@@ -337,8 +337,14 @@ vim js/config.js
 5. 以下のように編集:
 
 ```javascript
-const apiBaseUrl =
-  "https://your-api-id.execute-api.ap-northeast-1.amazonaws.com";
+const CONFIG = {
+  API_BASE_URL: "https://your-api-id.execute-api.ap-northeast-1.amazonaws.com", // API Gatway のデフォルトエンドポイントを入力
+  COGNITO: {
+    USER_POOL_ID: "ap-northeast-1_XXXXXXXXX", // User Pool ID を入力
+    CLIENT_ID: "XXXX", // Client ID を入力
+    REGION: "ap-northeast-1",
+  },
+};
 ```
 
 6. `ESC` キーを押してから `:wq` と入力し、`Enter` を押して保存
