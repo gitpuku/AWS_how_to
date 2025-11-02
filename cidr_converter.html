@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CIDR表記変換ツール</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 900px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        padding: 30px;
+      }
+
+      h1 {
+        text-align: center;
+        color: #333;
+        margin-bottom: 30px;
+        font-size: 28px;
+      }
+
+      .input-section {
+        margin-bottom: 30px;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: bold;
+        color: #555;
+      }
+
+      input {
+        width: 100%;
+        padding: 12px;
+        border: 2px solid #ddd;
+        border-radius: 8px;
+        font-size: 16px;
+        transition: border-color 0.3s;
+      }
+
+      input:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+
+      .result-section {
+        margin-top: 30px;
+      }
+
+      .result-box {
+        background: #f8f9fa;
+        border-radius: 10px;
+        padding: 20px;
+        margin-bottom: 20px;
+      }
+
+      .result-title {
+        font-weight: bold;
+        color: #667eea;
+        margin-bottom: 15px;
+        font-size: 18px;
+        border-bottom: 2px solid #667eea;
+        padding-bottom: 5px;
+      }
+
+      .ip-display {
+        font-family: "Courier New", monospace;
+        font-size: 16px;
+        margin: 10px 0;
+        padding: 10px;
+        background: white;
+        border-radius: 5px;
+      }
+
+      .binary-display {
+        font-family: "Courier New", monospace;
+        font-size: 14px;
+        line-height: 1.8;
+        background: white;
+        padding: 15px;
+        border-radius: 5px;
+        overflow-x: auto;
+      }
+
+      .network-part {
+        color: #e74c3c;
+        font-weight: bold;
+        background: #ffe6e6;
+        padding: 2px 4px;
+        border-radius: 3px;
+      }
+
+      .host-part {
+        color: #3498db;
+        font-weight: bold;
+        background: #e6f3ff;
+        padding: 2px 4px;
+        border-radius: 3px;
+      }
+
+      .octet-separator {
+        color: #999;
+        margin: 0 5px;
+      }
+
+      .info-row {
+        display: flex;
+        justify-content: space-between;
+        margin: 8px 0;
+        padding: 8px;
+        background: white;
+        border-radius: 5px;
+      }
+
+      .info-label {
+        font-weight: bold;
+        color: #666;
+      }
+
+      .info-value {
+        font-family: "Courier New", monospace;
+        color: #333;
+      }
+
+      .legend {
+        display: flex;
+        gap: 20px;
+        margin-top: 15px;
+        padding: 10px;
+        background: white;
+        border-radius: 5px;
+      }
+
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .legend-color {
+        width: 20px;
+        height: 20px;
+        border-radius: 3px;
+      }
+
+      .legend-network {
+        background: #ffe6e6;
+        border: 2px solid #e74c3c;
+      }
+
+      .legend-host {
+        background: #e6f3ff;
+        border: 2px solid #3498db;
+      }
+
+      .error {
+        color: #e74c3c;
+        background: #ffe6e6;
+        padding: 10px;
+        border-radius: 5px;
+        margin-top: 10px;
+      }
+
+      @media (max-width: 600px) {
+        .container {
+          padding: 20px;
+        }
+
+        h1 {
+          font-size: 24px;
+        }
+
+        .legend {
+          flex-direction: column;
+          gap: 10px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🌐 CIDR表記変換ツール</h1>
+
+      <div class="input-section">
+        <label for="cidrInput"
+          >CIDR表記を入力してください (例: 192.168.1.0/24)</label
+        >
+        <input
+          type="text"
+          id="cidrInput"
+          placeholder="192.168.1.0/24"
+          value="192.168.1.0/24"
+        />
+      </div>
+
+      <div class="legend">
+        <div class="legend-item">
+          <div class="legend-color legend-network"></div>
+          <span>ネットワーク部</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color legend-host"></div>
+          <span>ホスト部</span>
+        </div>
+      </div>
+
+      <div class="result-section" id="resultSection"></div>
+    </div>
+
+    <script>
+      // IPアドレスを2進数に変換
+      function ipToBinary(ip) {
+        return ip.split(".").map((octet) => {
+          return parseInt(octet).toString(2).padStart(8, "0");
+        });
+      }
+
+      // 2進数をIPアドレスに変換
+      function binaryToIp(binary) {
+        const octets = [];
+        for (let i = 0; i < 32; i += 8) {
+          octets.push(parseInt(binary.substr(i, 8), 2));
+        }
+        return octets.join(".");
+      }
+
+      // サブネットマスクを生成
+      function cidrToSubnetMask(cidr) {
+        const mask = "1".repeat(cidr) + "0".repeat(32 - cidr);
+        return binaryToIp(mask);
+      }
+
+      // ネットワークアドレスを計算
+      function calculateNetworkAddress(ip, cidr) {
+        const ipBinary = ipToBinary(ip).join("");
+        const networkBinary = ipBinary.substr(0, cidr) + "0".repeat(32 - cidr);
+        return binaryToIp(networkBinary);
+      }
+
+      // ブロードキャストアドレスを計算
+      function calculateBroadcastAddress(ip, cidr) {
+        const ipBinary = ipToBinary(ip).join("");
+        const broadcastBinary =
+          ipBinary.substr(0, cidr) + "1".repeat(32 - cidr);
+        return binaryToIp(broadcastBinary);
+      }
+
+      // 利用可能なホスト数を計算
+      function calculateHostCount(cidr) {
+        const hostBits = 32 - cidr;
+        return Math.pow(2, hostBits) - 2; // ネットワークアドレスとブロードキャストアドレスを除く
+      }
+
+      // 2進数表示を生成（ネットワーク部とホスト部を色分け）
+      function generateBinaryDisplay(ip, cidr) {
+        const binary = ipToBinary(ip);
+        let html = "";
+        let bitCount = 0;
+
+        binary.forEach((octet, index) => {
+          for (let i = 0; i < 8; i++) {
+            const bit = octet[i];
+            if (bitCount < cidr) {
+              html += `<span class="network-part">${bit}</span>`;
+            } else {
+              html += `<span class="host-part">${bit}</span>`;
+            }
+            bitCount++;
+          }
+          if (index < 3) {
+            html += '<span class="octet-separator">.</span>';
+          }
+        });
+
+        return html;
+      }
+
+      // 10進数表示を生成（ネットワーク部とホスト部を色分け）
+      function generateDecimalDisplay(ip, cidr) {
+        const octets = ip.split(".");
+        let html = "";
+        let bitCount = 0;
+
+        octets.forEach((octet, index) => {
+          const octetBits = 8;
+          const bitsInThisOctet = Math.min(cidr - bitCount, octetBits);
+
+          if (bitCount >= cidr) {
+            // すべてホスト部
+            html += `<span class="host-part">${octet}</span>`;
+          } else if (bitsInThisOctet >= octetBits) {
+            // すべてネットワーク部
+            html += `<span class="network-part">${octet}</span>`;
+          } else if (bitsInThisOctet > 0) {
+            // 混在（境界オクテット）
+            html += `<span style="background: linear-gradient(90deg, #ffe6e6 50%, #e6f3ff 50%); padding: 2px 4px; border-radius: 3px; font-weight: bold;">${octet}</span>`;
+          } else {
+            html += `<span class="host-part">${octet}</span>`;
+          }
+
+          bitCount += octetBits;
+
+          if (index < 3) {
+            html += '<span class="octet-separator">.</span>';
+          }
+        });
+
+        return html;
+      }
+
+      // CIDR表記をパース
+      function parseCIDR(cidrNotation) {
+        const match = cidrNotation.match(
+          /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\/(\d{1,2})$/
+        );
+        if (!match) {
+          throw new Error("無効なCIDR表記です。正しい形式: xxx.xxx.xxx.xxx/xx");
+        }
+
+        const ip = match[1];
+        const cidr = parseInt(match[2]);
+
+        // IPアドレスの各オクテットを検証
+        const octets = ip.split(".");
+        for (let octet of octets) {
+          const num = parseInt(octet);
+          if (num < 0 || num > 255) {
+            throw new Error(
+              "IPアドレスの各オクテットは0-255の範囲で指定してください"
+            );
+          }
+        }
+
+        // CIDRの範囲を検証
+        if (cidr < 0 || cidr > 32) {
+          throw new Error("プレフィックス長は0-32の範囲で指定してください");
+        }
+
+        return { ip, cidr };
+      }
+
+      // 結果を表示
+      function displayResults(cidrNotation) {
+        const resultSection = document.getElementById("resultSection");
+
+        try {
+          const { ip, cidr } = parseCIDR(cidrNotation);
+
+          const subnetMask = cidrToSubnetMask(cidr);
+          const networkAddress = calculateNetworkAddress(ip, cidr);
+          const broadcastAddress = calculateBroadcastAddress(ip, cidr);
+          const hostCount = calculateHostCount(cidr);
+          const firstHost = calculateFirstHost(networkAddress);
+          const lastHost = calculateLastHost(broadcastAddress);
+
+          resultSection.innerHTML = `
+                    <div class="result-box">
+                        <div class="result-title">📊 基本情報</div>
+                        <div class="info-row">
+                            <span class="info-label">入力されたIP:</span>
+                            <span class="info-value">${ip}/${cidr}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">サブネットマスク:</span>
+                            <span class="info-value">${subnetMask}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">ネットワークアドレス:</span>
+                            <span class="info-value">${networkAddress}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">ブロードキャストアドレス:</span>
+                            <span class="info-value">${broadcastAddress}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">利用可能なホスト数:</span>
+                            <span class="info-value">${hostCount.toLocaleString()} 台</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">利用可能範囲:</span>
+                            <span class="info-value">${firstHost} 〜 ${lastHost}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">最初のホスト:</span>
+                            <span class="info-value">${firstHost}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">最後のホスト:</span>
+                            <span class="info-value">${lastHost}</span>
+                        </div>
+                    </div>
+
+                    <div class="result-box">
+                        <div class="result-title">🔢 10進数表示（色分け）</div>
+                        <div class="ip-display">
+                            入力IP: ${generateDecimalDisplay(ip, cidr)}
+                        </div>
+                        <div class="ip-display">
+                            ネットワークアドレス: ${generateDecimalDisplay(
+                              networkAddress,
+                              cidr
+                            )}
+                        </div>
+                        <div class="ip-display">
+                            サブネットマスク: ${generateDecimalDisplay(
+                              subnetMask,
+                              cidr
+                            )}
+                        </div>
+                    </div>
+
+                    <div class="result-box">
+                        <div class="result-title">💻 2進数表示（32ビット）</div>
+                        <div class="binary-display">
+                            <div style="margin-bottom: 10px;">
+                                <strong>入力IP:</strong><br>
+                                ${generateBinaryDisplay(ip, cidr)}
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <strong>ネットワークアドレス:</strong><br>
+                                ${generateBinaryDisplay(networkAddress, cidr)}
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <strong>ブロードキャストアドレス:</strong><br>
+                                ${generateBinaryDisplay(broadcastAddress, cidr)}
+                            </div>
+                            <div>
+                                <strong>サブネットマスク:</strong><br>
+                                ${generateBinaryDisplay(subnetMask, cidr)}
+                            </div>
+                        </div>
+                        <div style="margin-top: 10px; padding: 10px; background: white; border-radius: 5px; font-size: 14px;">
+                            <strong>ビット数:</strong> 
+                            <span class="network-part" style="margin-left: 10px;">ネットワーク部: ${cidr} ビット</span>
+                            <span class="host-part" style="margin-left: 10px;">ホスト部: ${
+                              32 - cidr
+                            } ビット</span>
+                        </div>
+                    </div>
+                `;
+        } catch (error) {
+          resultSection.innerHTML = `
+                    <div class="error">
+                        ❌ エラー: ${error.message}
+                    </div>
+                `;
+        }
+      }
+
+      // 最初のホストアドレスを計算
+      function calculateFirstHost(networkAddress) {
+        const octets = networkAddress.split(".").map((x) => parseInt(x));
+        octets[3] += 1;
+
+        // キャリーオーバー処理
+        for (let i = 3; i > 0; i--) {
+          if (octets[i] > 255) {
+            octets[i] = 0;
+            octets[i - 1] += 1;
+          }
+        }
+
+        return octets.join(".");
+      }
+
+      // 最後のホストアドレスを計算
+      function calculateLastHost(broadcastAddress) {
+        const octets = broadcastAddress.split(".").map((x) => parseInt(x));
+        octets[3] -= 1;
+
+        // ボローイング処理
+        for (let i = 3; i > 0; i--) {
+          if (octets[i] < 0) {
+            octets[i] = 255;
+            octets[i - 1] -= 1;
+          }
+        }
+
+        return octets.join(".");
+      }
+
+      // イベントリスナー
+      const input = document.getElementById("cidrInput");
+
+      input.addEventListener("input", (e) => {
+        displayResults(e.target.value);
+      });
+
+      // 初期表示
+      displayResults(input.value);
+    </script>
+  </body>
+</html>
