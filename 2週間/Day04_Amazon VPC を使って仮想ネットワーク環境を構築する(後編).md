@@ -301,7 +301,7 @@ NAT Gateway（Network Address Translation Gateway）は、プライベートサ�
    sudo dnf install -y https://dev.mysql.com/get/mysql80-community-release-el9-1.noarch.rpm
 
    # MySQLサーバーとクライアントのインストール
-   sudo dnf install -y mysql-community-server
+   sudo dnf install -y install mysql mysql-community-server
    ```
 
 4. **MySQL サービスの開始**
@@ -386,9 +386,10 @@ NAT Gateway（Network Address Translation Gateway）は、プライベートサ�
 5. **アプリケーション用ユーザーの作成**
 
    ```sql
-   CREATE USER 'simpleblog_user'@'%' IDENTIFIED BY 'User!1234';
-   GRANT SELECT, INSERT, UPDATE, DELETE ON simpleblog.* TO 'simpleblog_user'@'%';
-   FLUSH PRIVILEGES;
+   CREATE USER 'simple_blog_user' IDENTIFIED BY 'User!1234';
+   #パスワードは各自変更し、覚えておいてください
+   GRANT ALL PRIVILEGES ON simple_blog.* TO 'simple_blog_user'@'%' WITH GRANT OPTION;
+
    ```
 
 6. **MySQL からログアウト**
@@ -408,13 +409,19 @@ NAT Gateway（Network Address Translation Gateway）は、プライベートサ�
    exit  # DBサーバーから出る
    ```
 
-2. **Web サーバーで MySQL クライアントをインストール**
+2. **MySQL 8.4 リポジトリのインストール**
+
+   ```bash
+   sudo dnf -y install https://dev.mysql.com/get/mysql84-community-release-el9-1.noarch.rpm
+   ```
+
+3. **Web サーバーで MySQL クライアントをインストール**
 
    ```bash
    sudo dnf install -y mysql php-mysqlnd
    ```
 
-3. **データベース接続テスト**
+4. **データベース接続テスト**
 
    ```bash
    mysql -h 10.0.101.20 -u simpleblog_user -p
@@ -422,20 +429,20 @@ NAT Gateway（Network Address Translation Gateway）は、プライベートサ�
 
    パスワード: User!1234
 
-4. **接続確認後、ログアウト**
+5. **接続確認後、ログアウト**
 
    ```sql
    exit
    ```
 
-5. **アプリケーションファイルの更新**
+6. **アプリケーションファイルの更新**
 
    ```bash
    cd ~
    sudo cp udemy-aws-14days/D04/index.php /var/www/html/
    ```
 
-6. **アプリケーションファイルの内容確認**
+7. **アプリケーションファイルの内容確認**
    データベース接続の PHP コードが含まれていることを確認してください。パスワードが異なる場合は適宜修正してください。
 
 ---
