@@ -1661,7 +1661,7 @@ JSONファイルは設定項目が多いため、以下の手順で作業しま�
 #### [deploymentController（デプロイコントローラー）](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentController.html)
 
 ```json
-"deploymentController": {　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　
+"deploymentController": {
   "type": "ECS"
 }
 ```
