@@ -1648,4 +1648,352 @@ Second
 Third
 ```
 
-必ずこの順番で実行されます(並列化されない)。
+## 必ずこの順番で実行されます(並列化されない)。
+
+## 11. Web API デプロイパイプラインの作成
+
+### 11.1 概要
+
+Spring Boot の Web API アプリケーションを ECS にデプロイするための GitHub Actions パイプラインを作成します。
+
+### 11.2 前提条件
+
+- GitHub リポジトリに `cicd-section/api` ディレクトリ配下に Spring Boot のコードが存在すること
+- 前のセクションで基本的な GitHub Actions の動作を確認済みであること
+
+### 11.3 ワークフローファイルの編集
+
+#### 11.3.1 ファイルの準備
+
+1. 前回作成した `.github/workflows/cicd.yml` ファイルを開きます
+
+#### 11.3.2 ワークフロー名の変更
+
+```yaml
+name: Web API デプロイパイプライン
+```
+
+**設定の意図:**
+
+- パイプラインの目的を明確にするため
+
+#### 11.3.3 トリガー設定の変更
+
+従来の `on: [push]` を以下のように変更します:
+
+```yaml
+on:
+  push:
+    paths:
+      - "cicd-section/api/**"
+```
+
+**設定の意図:**
+
+- `cicd-section/api` ディレクトリ配下のファイルに変更があった場合のみワークフローを実行
+- `**` はワイルドカードで、サブディレクトリを含めたすべてのファイルを対象とする
+- Spring Boot のコード以外の変更では、このパイプラインは実行されない(無駄な実行を防ぐ)
+
+#### 11.3.4 環境変数の定義
+
+`on` セクションの後に、環境変数を定義します:
+
+```yaml
+env:
+  AWS_REGION: us-west-2
+  ECS_CLUSTER: my-app-cluster
+  ECS_SERVICE: my-app-api-service
+  ECR_REPOSITORY: my-app-api
+  ECS_TASK_DEFINITION_API: cicd-section/.aws/task-definition.json
+```
+
+**各環境変数の説明:**
+
+| 変数名                    | 説明                               | 備考                               |
+| ------------------------- | ---------------------------------- | ---------------------------------- |
+| `AWS_REGION`              | 使用する AWS リージョン            | 今回は `us-west-2`(オレゴン)を使用 |
+| `ECS_CLUSTER`             | ECS クラスター名                   | 事前に作成済みのクラスター名       |
+| `ECS_SERVICE`             | ECS サービス名                     | 事前に作成済みのサービス名         |
+| `ECR_REPOSITORY`          | ECR リポジトリ名                   | 事前に作成済みのリポジトリ名       |
+| `ECS_TASK_DEFINITION_API` | ECS タスク定義ファイルのパス(JSON) | 後ほど作成するファイルのパス       |
+
+**注意:**
+
+- `ECS_CLUSTER`、`ECS_SERVICE`、`ECR_REPOSITORY` の値は、事前に作成した実際のリソース名に置き換えてください
+- `ECS_TASK_DEFINITION_API` のファイルは後の手順で作成します
+
+#### 11.3.5 パーミッション設定
+
+`env` セクションと `jobs` セクションの間に、パーミッション設定を追加します:
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+```
+
+**設定の意図:**
+
+- `id-token: write`: OpenID Connect(OIDC)認証で必要となる ID トークンの書き込み権限
+- `contents: read`: リポジトリのコンテンツ(コード)を読み取る権限
+- この設定により、GitHub Actions から AWS へ安全に認証できるようになります
+
+### 11.4 ジョブの定義
+
+#### 11.4.1 概要
+
+CI/CD パイプラインの基本的な流れは以下の通りです:
+
+```
+テスト → ビルド → デプロイ
+```
+
+今回は Spring Boot の特性を活かして、**テストとビルドを同時に実行**します。
+
+#### 11.4.2 test-and-build ジョブの作成
+
+##### ジョブの基本設定
+
+```yaml
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: cicd-section/api
+```
+
+**設定の説明:**
+
+| 項目                             | 説明                                           |
+| -------------------------------- | ---------------------------------------------- |
+| `test-and-build`                 | ジョブ名(テストとビルドを同時実行)             |
+| `runs-on: ubuntu-latest`         | Ubuntu の最新版を使用                          |
+| `defaults.run.working-directory` | 以降のステップで使用する作業ディレクトリを指定 |
+
+**working-directory の利点:**
+
+- Spring Boot のルートディレクトリを指定することで、以降のコマンドで毎回 `cd` する必要がなくなる
+- コードの見通しが良くなる
+
+##### ステップ 1: コードのチェックアウト
+
+```yaml
+   steps:
+   - name: Checkout code
+      uses: actions/checkout@v4
+```
+
+**設定の説明:**
+
+- `uses`: GitHub Marketplace の公開アクションを使用
+- `actions/checkout@v4`: GitHub 公式が提供するチェックアウトアクション
+- リポジトリのコードをワークフローの実行環境にダウンロード
+
+**参考:**
+
+- GitHub Marketplace で "checkout" を検索すると詳細を確認可能
+- https://github.com/marketplace/actions/checkout
+
+##### ステップ 2: テストとビルドイメージの作成
+
+```yaml
+- name: Run Test and Build an Image
+  run: docker image build -t temp_api_image:latest .
+```
+
+**設定の説明:**
+
+- Docker イメージをビルドし、`temp_api_image:latest` という一時的な名前を付与
+
+2. `Dockerfile` 内で `gradle build` が実行される
+3. `gradle build` の過程でテストコード(`src/test`)が自動実行される
+4. テストが失敗した場合、ビルドが失敗してパイプラインが停止
+
+**一時的な名前を付ける理由:**
+
+- この時点では ECR のレジストリ情報が確定していない
+- 後のステップで認証後に正式な名前に変更する
+- イメージ名(`my-app-api-image`)は ECR リポジトリ名に合わせて命名
+
+##### ステップ 3: AWS 認証の設定
+
+```yaml
+   - name: Configure AWS Credentials
+   uses: aws-actions/configure-aws-credentials@v4
+   with:
+      aws-region: ${{ env.AWS_REGION }}
+      role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+```
+
+**設定の説明:**
+
+| 項目             | 説明                                                               |
+| ---------------- | ------------------------------------------------------------------ |
+| `uses`           | AWS 公式が提供する認証設定アクション                               |
+| `with`           | アクションに渡すパラメータ                                         |
+| `aws-region`     | `${{ env.AWS_REGION }}`: 環境変数から取得                          |
+| `role-to-assume` | `${{ secrets.AWS_ROLE_TO_ASSUME }}`: GitHub Secrets から安全に取得 |
+
+**変数の使い分け:**
+
+| 使用箇所  | 用途                      | セキュリティレベル |
+| --------- | ------------------------- | ------------------ |
+| `env`     | リージョンなどの公開情報  | 低                 |
+| `secrets` | ロール ARN などの秘匿情報 | 高                 |
+
+**secrets の利点:**
+
+- YAML ファイルには記載されない
+- GitHub Actions のログにも表示されない(マスキングされる)
+- 限られた人のみが値を確認可能
+
+**OpenID Connect(OIDC)認証:**
+
+- この設定により、OIDC を使用した AWS への認証が行われます
+- 詳細は後のセクションで解説します
+
+**注意:**
+
+- `AWS_ROLE` の値は後ほど GitHub の Settings で設定します
+
+##### ステップ 4: Amazon ECR へのログイン
+
+```yaml
+- name: Login to Amazon ECR
+  id: login-ecr
+  uses: aws-actions/amazon-ecr-login@v2
+```
+
+**設定の説明:**
+
+- `id: login-ecr`: このステップに ID を付与(後続ステップで参照するため)
+- AWS 公式が提供する ECR ログインアクション
+- Docker Hub にログインするのと同様、ECR にイメージをプッシュするための事前認証
+
+**実行される内容:**
+
+- `docker login` コマンド相当の処理
+- 以前手動で実行した「プッシュコマンドを表示」の手順を自動化
+  　(ECR > プライベートリポジトリ > リポジトリ > my-app-api に「**プッシュコマンドを表示**」ボタンがあった)
+
+##### ステップ 5: イメージのタグ付けと ECR へのプッシュ
+
+````yaml
+- name: Push the Image to ECR
+  env:
+    ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+  run: |
+          docker image tag temp_api_image:latest $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+**環境変数の定義:**
+
+```yaml
+env:
+  ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+````
+
+- このステップ内で使用する環境変数を定義
+- `steps.login-ecr.outputs.registry`: 前のステップ(id: login-ecr)の出力結果を参照
+- ECR のレジストリ URL(例: `123456789012.dkr.ecr.us-west-2.amazonaws.com`)が格納される
+
+**タグの変更:**
+
+```bash
+docker image tag temp_api_image:latest $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+```
+
+元の名前: `temp_api_image:latest`
+↓
+新しい名前: `<ECRレジストリURL>/<リポジトリ名>:<コミットハッシュ>`
+
+**例:**
+
+```
+123456789012.dkr.ecr.us-west-2.amazonaws.com/my-app-api:a1b2c3d4e5f6...
+```
+
+**各部分の説明:**
+
+| 部分                        | 値の例                                         | 説明                 |
+| --------------------------- | ---------------------------------------------- | -------------------- |
+| `$ECR_REGISTRY`             | `123456789012.dkr.ecr.us-west-2.amazonaws.com` | ECR のレジストリ URL |
+| `${{ env.ECR_REPOSITORY }}` | `my-app-api`                                   | リポジトリ名         |
+| `${{ github.sha }}`         | `a1b2c3d4e5f6...`                              | Git コミットハッシュ |
+
+**コミットハッシュをタグに使用する理由:**
+
+1. **一意性の保証**: コミットごとに必ず異なるハッシュが生成される
+2. **トレーサビリティ**: どのコミットからビルドされたイメージか特定可能
+3. **重複防止**: 同じタグ名でイメージが上書きされることを防ぐ
+
+**プッシュの実行:**
+
+```bash
+docker image push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+```
+
+- タグ付けしたイメージを ECR にプッシュ
+
+**ECR_REGISTRY を環境変数から参照する理由:**
+
+- AWS アカウント ID が含まれており、秘匿性が高い情報
+- メールアドレスのように、漏洩しても直接攻撃されるわけではないが、公開すべきでない情報
+- ログイン後の出力結果から動的に取得することで、YAML ファイルに直接記載しない
+
+### 11.5 ワークフロー全体の確認
+
+ここまでで作成した `.github/workflows/cicd.yml` の全体像:
+
+```yaml
+name: Web API デプロイパイプライン
+
+on:
+  push:
+    paths:
+      - "cicd-section/api/**"
+
+env:
+  AWS_REGION: us-west-2
+  ECS_CLUSTER: my-app-cluster
+  ECS_SERVICE: my-app-api-service
+  ECR_REPOSITORY: my-app-api
+  ECS_TASK_DEFINITION_API: cicd-section/.aws/task-definition.json
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: cicd-section/api
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Test and Build Image
+        run: |
+          docker image build -t temp_api_image:latest .
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push Image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker image tag my-app-api-image:temp $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          docker image push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+```
