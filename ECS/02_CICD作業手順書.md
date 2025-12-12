@@ -1255,7 +1255,7 @@ GitHub Actions を使用するには、リポジトリの特定の場所にワ�
 1. `workflows` フォルダ内に新規ファイルを作成します
 
    - `workflows` フォルダを選択した状態で **New File** をクリック
-   - ファイル名を入力します: **`ci-cd.yml`**
+   - ファイル名を入力します: **`cicd.yml`**
 
    > **ファイル名について:**
    >
@@ -1269,7 +1269,7 @@ GitHub Actions を使用するには、リポジトリの特定の場所にワ�
 
 #### 10.4.1 ワークフロー定義の記述
 
-作成した `ci-cd.yml` ファイルに、以下の内容を記述します:
+作成した `cicd.yml` ファイルに、以下の内容を記述します:
 
 ```yaml
 name: CI/CD Pipeline
@@ -1386,7 +1386,7 @@ steps:
 
 #### 10.5.1 ファイルの保存
 
-1. `ci-cd.yml` ファイルを保存します
+1. `cicd.yml` ファイルを保存します
 
    - キーボード: `Ctrl + S`(Windows/Linux) または `Cmd + S`(macOS)
 
@@ -1451,7 +1451,7 @@ steps:
 
    Changes to be committed:
      (use "git rm --cached <file>..." to unstage)
-           new file:   .github/workflows/ci-cd.yml
+           new file:   .github/workflows/cicd.yml
    ```
 
 6. コミットを作成します
@@ -1465,7 +1465,7 @@ steps:
    ```
    [main (root-commit) xxxxxxxx] Add GitHub Actions CI/CD pipeline
     1 file changed, 30 insertions(+)
-    create mode 100644 .github/workflows/ci-cd.yml
+    create mode 100644 .github/workflows/cicd.yml
    ```
 
 7. リポジトリにプッシュします
@@ -1781,7 +1781,7 @@ jobs:
 
 ```yaml
    steps:
-   - name: Checkout code
+   - name: Checkout
       uses: actions/checkout@v4
 ```
 
@@ -1973,7 +1973,7 @@ jobs:
         working-directory: cicd-section/api
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Test and Build Image
@@ -1997,3 +1997,2959 @@ jobs:
           docker image tag my-app-api-image:temp $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
           docker image push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 ```
+
+---
+
+## 12. AWS 側の GitHub Actions 連携設定
+
+### 12.1 概要
+
+GitHub Actions から AWS のリソース(ECR、ECS など)にアクセスできるように、AWS 側の設定を行います。
+
+前回の講義で説明した **OpenID Connect(OIDC)** を使用して、AWS IAM 側に特定のリポジトリ、特定のブランチなど、特定の条件を満たしたリクエストだけに対してアクセストークンを与えるという設定をします。
+
+### 12.2 OpenID Connect(OIDC)とは
+
+#### 12.2.1 従来の認証方法の問題点
+
+**従来の方法: アクセスキーとシークレットキーを使用**
+
+- AWS のアクセスキーとシークレットキーを GitHub Secrets に保存
+- GitHub Actions から AWS へアクセスする際に使用
+- **問題点:**
+  - キーの有効期限がない(漏洩した場合のリスクが高い)
+  - キーのローテーション管理が必要
+  - 漏洩した場合の影響範囲が大きい
+
+#### 12.2.2 OIDC 認証のメリット
+
+**OIDC を使用した認証:**
+
+- 一時的なアクセストークンを発行
+- トークンの有効期限が短い(漏洩リスクの軽減)
+- 特定の条件(リポジトリ、ブランチなど)を満たした場合のみアクセス許可
+- アクセスキーを GitHub に保存する必要がない
+
+**認証フロー:**
+
+```
+GitHub Actions → AWS STS(Security Token Service)
+              ↓
+         IDトークンを送信
+              ↓
+    AWS IAMで条件を検証(リポジトリ、ブランチなど)
+              ↓
+  条件を満たす場合のみ一時的なアクセストークンを発行
+              ↓
+    GitHub Actionsが一時トークンでAWSリソースにアクセス
+```
+
+### 12.3 IAM ID プロバイダーの作成
+
+#### 12.3.1 IAM コンソールへアクセス
+
+1. AWS マネジメントコンソールで「**IAM**」を検索します
+2. 「IAM」をクリックして開きます
+
+#### 12.3.2 ID プロバイダーの追加
+
+1. 左側のメニューで「**ID プロバイダー**」をクリックします
+2. 「**プロバイダーを追加**」ボタンをクリックします
+
+#### 12.3.3 プロバイダーの設定
+
+**プロバイダーのタイプ:**
+
+- 「**OpenID Connect**」を選択します
+  - SAML ではなく、OpenID Connect を選択
+
+**プロバイダーの URL:**
+
+```
+https://token.actions.githubusercontent.com
+```
+
+- この値は GitHub 公式ドキュメントで指定されているものです
+- 参考: [GitHub Actions で OpenID Connect を使用した AWS の設定](https://docs.github.com/ja/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services)
+
+**対象者(Audience):**
+
+```
+sts.amazonaws.com
+```
+
+- こちらも GitHub 公式ドキュメントに記載されている値です
+
+**タグ:**
+
+- 設定不要(デフォルトのまま)
+
+#### 12.3.4 サムプリントの取得
+
+1. 「**サムプリントを取得**」ボタンをクリックします
+   - サムプリントが自動的に取得されます
+
+#### 12.3.5 プロバイダーの作成
+
+1. 「**プロバイダーを追加**」ボタンをクリックします
+2. ID プロバイダーが作成されます
+
+**作成完了メッセージ:**
+
+> このプロバイダーの使用を開始するには、IAM ロールを割り当てる必要があります。
+
+次のセクションでロールの割り当てを行います。
+
+---
+
+### 12.4 IAM ロールの作成と割り当て
+
+#### 12.4.1 ロールの割り当て開始
+
+1. ID プロバイダーの作成完了画面で「**ロールの割り当て**」ボタンをクリックします
+2. 「**新しいロールを作成**」を選択した状態で「**次へ**」をクリックします
+
+#### 12.4.2 信頼されたエンティティの設定
+
+**信頼されたエンティティタイプ:**
+
+- 「**Web アイデンティティ**」が選択された状態を確認します
+
+**アイデンティティプロバイダー:**
+
+- 先ほど作成した「**token.actions.githubusercontent.com**」が選択されていることを確認します
+
+**Audience:**
+
+- 「**sts.amazonaws.com**」が選択されていることを確認します
+
+#### 12.4.3 GitHub 組織とリポジトリの設定
+
+画面を下にスクロールして、以下の項目を設定します:
+
+**GitHub 組織:**
+
+```
+<あなたのGitHubアカウント名またはOrganization名>
+```
+
+- 個人アカウントの場合: GitHub のユーザー名を入力
+- Organization の場合: Organization 名を入力
+- 例: リポジトリ URL が `https://github.com/yourname/ecs-learning-course` の場合、`yourname` を入力
+
+**GitHub リポジトリ:**
+
+```
+ecs-learning-course
+```
+
+- 今回使用するリポジトリの名前を入力します
+
+**GitHub ブランチ:**
+
+```
+main
+```
+
+- `main` ブランチからのプッシュに対してのみ許可するように設定します
+- 本番環境では、特定のブランチのみを許可することでセキュリティを向上できます
+
+#### 12.4.4 次へ
+
+1. 設定が完了したら「**次へ**」ボタンをクリックします
+
+---
+
+### 12.5 許可ポリシーの設定(後で設定)
+
+#### 12.5.1 許可ポリシーの概要
+
+このロールに割り当てるポリシーによって、発行されるアクセストークンでできることが決まります。
+
+今回必要な権限:
+
+- ECR へのイメージのアップロード
+- ECS タスク定義の更新
+- ECS サービスの更新
+
+#### 12.5.2 一旦スキップ
+
+1. この画面では**何も選択せずに**「**次へ**」をクリックします
+   - 後ほどインラインポリシーとして設定します
+
+---
+
+### 12.6 ロール名と信頼ポリシーの確認
+
+#### 12.6.1 ロール名の設定
+
+**ロール名:**
+
+```
+GitHubActionsEcsLearningCourse
+```
+
+- わかりやすい名前を付けます
+- 例: `GitHubActions` + `ECSLearningCourse` リポジトリ用
+
+**説明(任意):**
+
+```
+Role for GitHub Actions ecs-learning-course-repository
+```
+
+#### 12.6.2 信頼されたエンティティの確認
+
+画面を下にスクロールして、「**信頼されたエンティティ**」セクションを確認します。
+
+**信頼ポリシーの例:**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:yourname/ecs-learning-course:ref:refs/heads/main"
+        }
+      }
+    }
+  ]
+}
+```
+
+**重要な部分:**
+
+```json
+"token.actions.githubusercontent.com:sub": "repo:yourname/ecs-learning-course:ref:refs/heads/main"
+```
+
+この設定により:
+
+- 指定した組織(`yourname`)
+- 指定したリポジトリ(`ecs-learning-course`)
+- 指定したブランチ(`main`)
+
+からのリクエストに対してのみアクセストークンを発行します。
+
+#### 12.6.3 ロールの作成
+
+1. 内容を確認したら「**ロールを作成**」ボタンをクリックします
+2. ロールが作成されます
+
+---
+
+### 12.7 インラインポリシーの追加
+
+#### 12.7.1 作成したロールを開く
+
+1. IAM コンソールで左側のメニューから「**ロール**」をクリックします
+2. ロール一覧から「**GitHubActionsEcsLearningCourse**」を探してクリックします
+
+#### 12.7.2 許可ポリシーの追加開始
+
+1. 「**許可を追加**」ボタンをクリックします
+2. 「**インラインポリシーを作成**」を選択します
+
+#### 12.7.3 ポリシーエディターの切り替え
+
+1. デフォルトでは「**ビジュアル**」エディターが表示されています
+2. 「**JSON**」タブをクリックして JSON エディターに切り替えます
+
+#### 12.7.4 ECR 用のポリシーを流用
+
+**以前作成したローカルユーザーのポリシーを確認:**
+
+> **注意:** 以前のセクションで「ECR へのプッシュ・プル用のローカルユーザー」を作成していた場合、そのユーザーにアタッチされているポリシーを流用できます。削除してしまった場合は、次のステップで記載する JSON をそのまま使用してください。
+
+1. 新しいタブで IAM コンソールを開きます(右クリック → 新しいタブで開く)
+2. 左側のメニューで「**ユーザー**」をクリックします
+3. ローカルユーザー(例: `local-user`)をクリックします
+4. 「**許可**」タブで、アタッチされているポリシー(例: `ECRPushPushPullImage`)をクリックします
+5. 「**JSON**」タブで内容を確認します
+
+**ポリシーの例:**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid":"Statement1",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:GetDownloadUrlForLayer",
+        "ecr: BatchGetImage",
+        "ecr:BatchCheckLayerAvailability",
+        "ecr: PutImage",
+        "ecr:InitiateLayerUpload",
+        "ecr: UploadLayerPart",
+        "ecr:CompleteLayerUpload",
+        "ecr:GetAuthorizationToken"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+6. このポリシーの `Statement` 配列内の波括弧 `{ ... }` 部分をコピーします
+
+#### 12.7.5 ECS タスク定義更新用の権限を追加
+
+1. ポリシー作成画面に戻ります
+2. JSON エディターに以下の内容を貼り付けます:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid":"Statement1",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:GetDownloadUrlForLayer",
+        "ecr: BatchGetImage",
+        "ecr:BatchCheckLayerAvailability",
+        "ecr: PutImage",
+        "ecr:InitiateLayerUpload",
+        "ecr: UploadLayerPart",
+        "ecr:CompleteLayerUpload",
+        "ecr:GetAuthorizationToken"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:UpdateService",
+        "ecs:RegisterTaskDefinition",
+        "ecs:ListTaskDefinitions",
+        "ecs:DescribeServices"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+**ポリシーの内容説明:**
+
+| アクション                             | 説明                                        |
+| -------------------------------------- | ------------------------------------------- |
+| `ecr:GetDownloadUrlForLayer`           | イメージレイヤーのダウンロード URL 取得     |
+| `ecr:BatchGetImage`                    | イメージの取得                              |
+| `ecr:BatchCheckLayerAvailability`      | イメージレイヤーの存在確認                  |
+| `ecr:PutImage`                         | イメージのプッシュ                          |
+| `ecr:InitiateLayerUpload`              | レイヤーアップロードの開始                  |
+| `ecr:UploadLayerPart`                  | レイヤーの部分アップロード                  |
+| `ecr:CompleteLayerUpload`              | レイヤーアップロードの完了                  |
+| `ecr:GetAuthorizationToken`            | ECR へのログイン認証トークンを取得          |
+| `ecs:UpdateService`                    | ECS サービスの更新                          |
+| `ecs:RegisterTaskDefinition`           | 新しいタスク定義の登録                      |
+| `ecs:ListTaskDefinitions`              | タスク定義の一覧取得                        |
+| `ecs:DescribeServices`                 | ECS サービスの情報取得                      |
+
+> **詳細を確認したい場合:**
+> 各アクションの詳細は AWS 公式ドキュメントを参照してください。
+>
+> - [ECR のアクション](https://docs.aws.amazon.com/ja_jp/AmazonECR/latest/APIReference/API_Operations.html)
+> - [ECS のアクション](https://docs.aws.amazon.com/ja_jp/AmazonECS/latest/APIReference/API_Operations.html)
+
+#### 12.7.6 ビジュアルエディターでの確認
+
+1. 「**ビジュアル**」タブをクリックして切り替えます
+2. 以下のように表示されることを確認します:
+   - **許可 1**: ECR 関連のアクション(8 個)
+   - **許可 2**: ECS 関連のアクション(4 個)
+
+#### 12.7.7 ポリシー名の設定
+
+1. 「**次へ**」ボタンをクリックします
+2. **ポリシー名**を入力します:
+
+```
+UpdateECSTask
+```
+
+#### 12.7.8 ポリシーの作成
+
+1. 「**ポリシーの作成**」ボタンをクリックします
+2. ポリシーがロールにアタッチされます
+
+#### 12.7.9 ポリシーの確認
+
+1. ロールの詳細ページに戻ります
+2. 「**許可**」タブで、以下が表示されることを確認します:
+   - インラインポリシー: `UpdateECSTask`
+3. ポリシー名の左側の **`▶`(展開アイコン)** をクリックします
+4. 先ほど記述した JSON の内容が表示されることを確認します
+
+---
+
+### 12.8 GitHub Secrets への AWS ロール ARN の設定
+
+#### 12.8.1 ロール ARN のコピー
+
+1. IAM コンソールのロール詳細ページで、「**概要**」セクションを確認します
+2. **ARN(Amazon Resource Name)** が表示されています
+
+   **例:**
+
+   ```
+   arn:aws:iam::123456789012:role/GitHubActionsEcsLearningCourse
+   ```
+
+3. ARN の右側にある **コピーアイコン** をクリックして ARN をコピーします
+
+#### 12.8.2 GitHub リポジトリの Settings へアクセス
+
+1. GitHub のリポジトリページ(`https://github.com/yourname/ecs-learning-course`)を開きます
+2. ページ上部のタブメニューから「**Settings**」をクリックします
+
+> **注意:** リポジトリのオーナーまたは管理者権限が必要です。Settings タブが表示されない場合は、権限を確認してください。
+
+#### 12.8.3 Secrets and variables の設定
+
+1. 左側のメニューで「**Secrets and variables**」をクリックして展開します
+2. 「**Actions**」をクリックします
+
+#### 12.8.4 新しい Secret の追加
+
+1. 「**Secrets**」タブが選択されていることを確認します
+2. 「**New repository secret**」ボタンをクリックします
+
+#### 12.8.5 Secret の設定
+
+**Name(変数名):**
+
+```
+AWS_ROLE_TO_ASSUME
+```
+
+- この変数名は、GitHub Actions のワークフローファイル(`cicd.yml`)で使用しています
+- `${{ secrets.AWS_ROLE_TO_ASSUME }}` として参照されます
+
+**Secret(値):**
+
+- 先ほどコピーした **ロールの ARN** を貼り付けます
+
+  **例:**
+
+  ```
+  arn:aws:iam::123456789012:role/GitHubActionsEcsLearningCourse
+  ```
+
+#### 12.8.6 Secret の追加
+
+1. 「**Add secret**」ボタンをクリックします
+2. Secret が追加されます
+
+**確認:**
+
+- 「Repository secrets」セクションに `AWS_ROLE_TO_ASSUME` が表示されます
+- 値は `***` でマスキングされて表示されます(セキュリティのため)
+
+---
+
+### 12.9 設定完了の確認
+
+#### 12.9.1 設定内容のまとめ
+
+これまでの設定により、以下が完了しました:
+
+| 設定項目             | 内容                                                           |
+| -------------------- | -------------------------------------------------------------- |
+| **ID プロバイダー**  | GitHub Actions からの OIDC 認証を受け入れる設定               |
+| **IAM ロール**       | 特定のリポジトリ・ブランチからのみアクセス許可                 |
+| **許可ポリシー**     | ECR へのプッシュ、ECS タスク定義の更新権限を付与               |
+| **GitHub Secrets**   | ワークフローからロール ARN を安全に参照できるように設定        |
+
+#### 12.9.2 GitHub Actions から AWS へのアクセスフロー
+
+```
+┌─────────────────────────────────────────────┐
+│ GitHub Actions (cicd.yml)                  │
+│ - main ブランチへのプッシュをトリガー       │
+└────────────────┬────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────┐
+│ AWS STS (Security Token Service)            │
+│ - IDトークンを検証                          │
+│ - リポジトリ、ブランチなどの条件を確認      │
+└────────────────┬────────────────────────────┘
+                 │ 条件を満たす場合
+                 ▼
+┌─────────────────────────────────────────────┐
+│ 一時的なアクセストークンを発行              │
+│ - 有効期限: 短時間(例: 1時間)               │
+│ - 権限: UpdateECSTask の範囲内        │
+└────────────────┬────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────┐
+│ AWS リソースへのアクセス                    │
+│ - ECR: イメージのプッシュ                   │
+│ - ECS: タスク定義の更新、サービスの更新     │
+└─────────────────────────────────────────────┘
+```
+
+#### 12.9.3 次のステップ
+
+これで、GitHub Actions から AWS にアクセスするための設定がすべて完了しました。
+
+次のセクションでは:
+
+- ワークフローファイルの最終調整
+- GitHub へのプッシュ
+- パイプラインの実行確認
+- ECR へのイメージプッシュの確認
+
+を行います。
+
+---
+
+## 13. ワークフローファイルの最終調整とパイプライン実行
+
+### 13.1 概要
+
+ワークフローファイル(`cicd.yml`)を最終調整し、GitHub にプッシュしてパイプラインを実行します。
+
+### 13.2 不要なジョブの削除
+
+#### 13.2.1 ファイルを開く
+
+1. VS Code で `.github/workflows/cicd.yml` を開きます
+
+#### 13.2.2 不要なジョブを削除
+
+以前のテスト用に作成した以下のジョブが残っている場合は削除します:
+
+- `hello-job`
+- `goodbye-job`
+
+**削除対象の例:**
+
+```yaml
+hello-job:
+  runs-on: ubuntu-latest
+  steps:
+    - run: echo Hello
+    - run: echo "GitHub Actions!"
+
+goodbye-job:
+  runs-on: ubuntu-latest
+  steps:
+    - run: echo "Goodbye GitHub Actions!"
+```
+
+これらのジョブ定義を削除してください。
+
+> **注意:** `deploy` ジョブに関するコメントが残っている場合は、そのまま残しておいてください。後ほどデプロイ機能を追加します。
+
+#### 13.2.3 ファイルを保存
+
+1. `Ctrl + S` でファイルを保存します
+
+---
+
+### 13.3 トリガー条件の修正
+
+#### 13.3.1 問題点の確認
+
+現在の `on` セクションは以下のようになっています:
+
+```yaml
+on:
+  push:
+    paths:
+      - "cicd-section/api/**"
+```
+
+**この設定の問題点:**
+
+- `cicd-section/api` ディレクトリ配下のファイルが変更された場合のみワークフローが実行される
+- しかし、`cicd.yml` ファイル自体は `.github/workflows/` ディレクトリに存在する
+- **結果:** `cicd.yml` ファイルを変更してプッシュしても、ワークフローが実行されない
+
+#### 13.3.2 解決方法
+
+`cicd.yml` ファイル自体の変更もトリガーとして認識されるよう、パスの条件を追加します。
+
+#### 13.3.3 修正内容
+
+`on` セクションを以下のように修正します:
+
+**修正前:**
+
+```yaml
+on:
+  push:
+    paths:
+      - "cicd-section/api/**"
+```
+
+**修正後:**
+
+```yaml
+on:
+  push:
+    paths:
+      - "cicd-section/api/**"
+      - ".github/workflows/**"
+```
+
+**追加した条件の説明:**
+
+- `.github/workflows/**`: `.github/workflows` ディレクトリ配下のすべてのファイル
+- `**` はワイルドカードで、サブディレクトリを含むすべてのファイルを対象
+- この条件により、`cicd.yml` ファイル自体の変更もトリガーとして認識される
+
+#### 13.3.4 ファイルを保存
+
+1. `Ctrl + S` でファイルを保存します
+
+---
+
+### 13.4 GitHub へのプッシュ
+
+#### 13.4.1 ターミナルを開く
+
+1. VS Code でターミナルを開きます
+   - メニュー: **Terminal → New Terminal**
+   - または `Ctrl + `(バッククォート)`
+
+#### 13.4.2 リポジトリのルートディレクトリに移動
+
+```bash
+cd /path/to/ecs-learning-course
+```
+
+※ご自身の環境に合わせてパスを変更してください
+
+#### 13.4.3 変更をステージング
+
+```bash
+git add .
+```
+
+- すべての変更ファイルをステージングエリアに追加します
+
+#### 13.4.4 コミットの作成
+
+```bash
+git commit -m "Update cicd.yml"
+```
+
+**出力例:**
+
+```
+[main xxxxxxxx] Update cicd.yml
+ 1 file changed, 5 insertions(+), 20 deletions(-)
+```
+
+#### 13.4.5 リモートリポジトリへプッシュ
+
+```bash
+git push origin main
+```
+
+**出力例:**
+
+```
+Enumerating objects: 7, done.
+Counting objects: 100% (7/7), done.
+Delta compression using up to 8 threads
+Compressing objects: 100% (4/4), done.
+Writing objects: 100% (4/4), 456 bytes | 456.00 KiB/s, done.
+Total 4 (delta 3), reused 0 (delta 0), pack-reused 0
+remote: Resolving deltas: 100% (3/3), completed with 3 local objects.
+To https://github.com/yourname/ecs-learning-course.git
+   xxxxxxxx..yyyyyyyy  main -> main
+```
+
+プッシュが完了すると、GitHub Actions が自動的にワークフローを実行開始します。
+
+---
+
+### 13.5 GitHub Actions の実行確認
+
+#### 13.5.1 Actions ページへアクセス
+
+1. GitHub のリポジトリページにアクセスします
+   ```
+   https://github.com/<yourname>/ecs-learning-course
+   ```
+
+2. ページ上部のタブメニューから「**Actions**」をクリックします
+
+#### 13.5.2 ワークフローの実行状態を確認
+
+**ワークフロー一覧:**
+
+- 最新のワークフロー実行として「**Update cicd.yml**」(先ほどのコミットメッセージ)が表示されます
+
+**ステータスの種類:**
+
+| アイコン | 色   | 状態             | 説明                         |
+| -------- | ---- | ---------------- | ---------------------------- |
+| ⏳       | 黄色 | 実行中(In progress) | ワークフローが現在実行中     |
+| ✓        | 緑色 | 成功(Success)    | すべてのジョブが正常に完了   |
+| ✗        | 赤色 | 失敗(Failure)    | いずれかのジョブが失敗       |
+
+#### 13.5.3 ワークフローの詳細を確認
+
+1. 「**Update cicd.yml**」のワークフロー実行をクリックします
+
+2. ワークフローの詳細ページが表示されます
+
+**ページ構成:**
+
+- **左側:** ジョブ一覧
+  - `test-and-build` ジョブが表示されます
+- **右側:** ログ表示領域
+
+#### 13.5.4 ジョブの実行ログを確認
+
+1. 左側のジョブ一覧から「**test-and-build**」をクリックします
+
+2. ジョブ内のステップが展開されて表示されます
+
+**表示されるステップ:**
+
+```
+✓ Set up job
+✓ Checkout code
+✓ Test and Build Image
+✓ Configure AWS Credentials
+✓ Login to Amazon ECR
+✓ Push Image to ECR
+✓ Complete job
+```
+
+3. 各ステップをクリックすると、詳細なログを確認できます
+
+**確認ポイント:**
+
+- すべてのステップが緑色のチェックマーク(✓)になっていることを確認
+- 特に「**Push Image to ECR**」ステップが成功していることを確認
+
+#### 13.5.5 エラーが発生した場合
+
+**赤色の✗マークが表示された場合:**
+
+1. 失敗したステップをクリックして詳細ログを確認
+2. エラーメッセージを読んで原因を特定
+3. 設定の見直しや修正を行う
+
+**よくあるエラー:**
+
+| エラー内容                     | 原因                                       | 対処法                                |
+| ------------------------------ | ------------------------------------------ | ------------------------------------- |
+| `Error: Could not assume role` | IAM ロールの ARN が正しく設定されていない  | GitHub Secrets の `AWS_ROLE_TO_ASSUME` を確認 |
+| `Error: ECR login failed`      | ECR へのログイン権限がない                 | IAM ポリシーで ECR 権限を確認         |
+| `Error: Cannot push to ECR`    | ECR リポジトリが存在しない、または権限不足 | ECR リポジトリの存在と権限を確認      |
+
+---
+
+### 13.6 ECR でイメージの確認
+
+#### 13.6.1 ECR コンソールへアクセス
+
+1. AWS マネジメントコンソールで「**ECR**」を検索します
+2. 「Elastic Container Registry」を選択します
+
+#### 13.6.2 プライベートリポジトリを開く
+
+1. 左側のメニューで「**プライベートリポジトリ**」をクリックします
+2. リポジトリ一覧から「**my-app-api**」をクリックします
+
+#### 13.6.3 イメージの確認
+
+**イメージ一覧:**
+
+プライベートリポジトリの詳細ページで、「**イメージ**」タブを開くと、以下のような情報が表示されます:
+
+| イメージタグ                     | プッシュ日時             | イメージサイズ |
+| -------------------------------- | ------------------------ | -------------- |
+| `5364a8c...`(長いハッシュ値) | 2025-12-13 10:30:45 JST | 524 MB         |
+
+**確認ポイント:**
+
+- 新しいイメージが追加されていることを確認
+- 以前は空だったリポジトリにイメージが存在する
+- これが GitHub Actions パイプラインによって自動的にプッシュされたイメージです
+
+#### 13.6.4 イメージタグの意味
+
+**イメージタグの値:**
+
+```
+5364a8c1b2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7
+```
+
+この値は **Git のコミットハッシュ(SHA)** です。
+
+**タグに SHA を使用するメリット:**
+
+| メリット               | 説明                                                    |
+| ---------------------- | ------------------------------------------------------- |
+| **一意性の保証**       | 各コミットで必ず異なるハッシュが生成される              |
+| **トレーサビリティ**   | どのコミットからビルドされたイメージか特定可能          |
+| **デプロイの追跡**     | 本番環境で動作しているコードのバージョンを正確に把握    |
+| **ロールバックの容易性** | 特定のコミット時点のイメージに簡単に戻すことができる    |
+
+---
+
+### 13.7 イメージタグと Git SHA の照合
+
+#### 13.7.1 GitHub のコミット履歴を確認
+
+1. GitHub のリポジトリページに戻ります
+2. ページ上部のタブメニューから「**Code**」をクリックします
+3. コミット数が表示されている部分をクリックします
+   - 例: 「**5 commits**」のようなリンク
+
+#### 13.7.2 コミット履歴ページ
+
+コミット履歴ページが表示されます。
+
+**表示内容:**
+
+```
+Update cicd.yml
+5364a8c · 10 minutes ago · yourname
+─────────────────────────────────────
+
+Add GitHub Actions CI/CD pipeline
+a1b2c3d · 2 hours ago · yourname
+─────────────────────────────────────
+
+Initial commit
+e1f2g3h · 1 day ago · yourname
+```
+
+#### 13.7.3 コミット SHA の確認
+
+最新のコミット「**Update cicd.yml**」の右側を見ると:
+
+```
+5364a8c
+```
+
+このように短縮された SHA が表示されています。
+
+#### 13.7.4 SHA の照合
+
+**ECR のイメージタグ(フル):**
+
+```
+5364a8c1b2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7
+```
+
+**GitHub の SHA(短縮版):**
+
+```
+5364a8c
+```
+
+**照合結果:**
+
+- ECR のイメージタグの **先頭部分** が GitHub の SHA と一致しています
+- ECR には **フル SHA**(40 文字)が使用されています
+- GitHub では **短縮 SHA**(7 文字)が表示されています
+
+> **補足:**
+>
+> - Git の SHA ハッシュは本来 40 文字の 16 進数文字列です
+> - GitHub の UI では、見やすさのために最初の 7 文字のみを表示します
+> - しかし、どちらも同じコミットを指しています
+
+#### 13.7.5 フル SHA の確認方法
+
+**GitHub でフル SHA を確認する方法:**
+
+1. コミット履歴ページで、コミットメッセージをクリックします
+2. コミット詳細ページが開きます
+3. URL を確認します:
+
+   ```
+   https://github.com/yourname/ecs-learning-course/commit/5364a8c1b2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7
+   ```
+
+4. URL の最後の部分がフル SHA です
+
+**または、ページ内の表示を確認:**
+
+- コミット詳細ページの右側に、フル SHA がコピー可能な形式で表示されています
+
+---
+
+### 13.8 動作確認のまとめ
+
+#### 13.8.1 確認できたこと
+
+| 項目                           | 確認内容                                       | 結果 |
+| ------------------------------ | ---------------------------------------------- | ---- |
+| **GitHub Actions の実行**      | ワークフローが正常に完了                       | ✓    |
+| **AWS 認証**                   | OIDC を使用した AWS への認証が成功             | ✓    |
+| **Docker イメージのビルド**    | Spring Boot アプリケーションのイメージが作成   | ✓    |
+| **ECR へのプッシュ**           | イメージが ECR にアップロードされた            | ✓    |
+| **イメージタグの設定**         | Git の SHA がタグとして正しく設定された        | ✓    |
+
+#### 13.8.2 パイプラインの全体フロー
+
+```
+┌──────────────────────────────────────┐
+│ 1. 開発者がコードをプッシュ          │
+│    (git push origin main)            │
+└────────────────┬─────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────┐
+│ 2. GitHub Actions がトリガー         │
+│    (main ブランチへのプッシュ検知)   │
+└────────────────┬─────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────┐
+│ 3. ソースコードのチェックアウト      │
+└────────────────┬─────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────┐
+│ 4. Docker イメージのビルド           │
+│    (テストも同時に実行)              │
+└────────────────┬─────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────┐
+│ 5. AWS への認証(OIDC)                │
+└────────────────┬─────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────┐
+│ 6. ECR へのログイン                  │
+└────────────────┬─────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────┐
+│ 7. イメージのタグ付け                │
+│    (タグ = Git SHA)                  │
+└────────────────┬─────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────┐
+│ 8. ECR へイメージをプッシュ          │
+└──────────────────────────────────────┘
+```
+
+#### 13.8.3 現在の状態
+
+**完了したこと:**
+
+- ✓ CI(継続的インテグレーション)パイプラインの構築
+- ✓ テストとビルドの自動化
+- ✓ ECR へのイメージプッシュの自動化
+
+**次のステップ:**
+
+- CD(継続的デプロイメント)パイプラインの構築
+- ECS サービスへの自動デプロイ
+- タスク定義の自動更新
+
+次のセクションでは、ECR にプッシュされたイメージを使用して、ECS サービスに自動的にデプロイする仕組みを構築します。
+
+---
+
+## 14. ECS タスク定義の更新とデプロイパイプラインの構築
+
+### 14.1 概要
+
+ECR にプッシュされたイメージを使用して、ECS タスク定義を更新し、サービスにデプロイする CD(継続的デプロイメント)パイプラインを構築します。
+
+### 14.2 ECS タスク更新の仕組み
+
+#### 14.2.1 現在の状態
+
+**現在動作しているコンテナ:**
+
+- ECS サービス: `my-app-api-service`
+- タスク定義: `my-app-api` (リビジョン 1)
+- コンテナ: NGINX(ダミーコンテナ)
+
+#### 14.2.2 目標とする状態
+
+**デプロイ後の状態:**
+
+- ECS サービス: `my-app-api-service`
+- タスク定義: `my-app-api` (リビジョン 2)
+- コンテナ: Spring Boot WEB API
+
+#### 14.2.3 タスク定義の更新プロセス
+
+ECS のアプリケーション更新は、**タスク定義を更新してデプロイする**ことを意味します。
+
+**更新の流れ:**
+
+```
+┌────────────────────────────────────┐
+│ 1. 現在のタスク定義               │
+│    my-app-api:1 (NGINX)            │
+└────────────────┬───────────────────┘
+                 │
+                 ▼
+┌────────────────────────────────────┐
+│ 2. タスク定義を更新                │
+│    - JSONファイルを編集            │
+│    - イメージURIを書き換え         │
+└────────────────┬───────────────────┘
+                 │
+                 ▼
+┌────────────────────────────────────┐
+│ 3. 新しいタスク定義を登録          │
+│    my-app-api:2 (Spring Boot)      │
+└────────────────┬───────────────────┘
+                 │
+                 ▼
+┌────────────────────────────────────┐
+│ 4. ECSサービスをデプロイ           │
+│    新しいタスク定義を使用          │
+└────────────────────────────────────┘
+```
+
+#### 14.2.4 タスク定義 JSON の構造
+
+タスク定義は JSON 形式で記述されます:
+
+```json
+{
+  "family": "my-app-api",
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "123456789012.dkr.ecr.us-west-2.amazonaws.com/my-app-api:abc123...",
+      "cpu": 256,
+      "memory": 512,
+      ...
+    }
+  ],
+  ...
+}
+```
+
+**重要なポイント:**
+
+- タスク定義のほとんどの属性は変更不要
+- **変更が必要な部分:** `image` フィールドのみ
+  - このフィールドに ECR のイメージ URI を指定
+  - コミットごとに異なるイメージタグ(SHA)を使用
+
+**デプロイの戦略:**
+
+1. タスク定義の**テンプレート JSON ファイル**を用意
+2. GitHub Actions 内で `image` フィールドだけを動的に書き換え
+3. 新しいタスク定義として登録
+4. ECS サービスにデプロイ
+
+---
+
+### 14.3 deploy ジョブの作成
+
+#### 14.3.1 ワークフローファイルを開く
+
+1. VS Code で `.github/workflows/ci-cd.yml` を開きます
+
+#### 14.3.2 deploy ジョブの追加
+
+`test-and-build` ジョブの後に、`deploy` ジョブを追加します。
+
+**追加する内容:**
+
+```yaml
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [test-and-build]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+```
+
+#### 14.3.3 設定内容の説明
+
+**ジョブの基本設定:**
+
+```yaml
+deploy:
+  runs-on: ubuntu-latest
+  needs: [test-and-build]
+```
+
+| 項目                | 説明                                                   |
+| ------------------- | ------------------------------------------------------ |
+| `deploy`            | ジョブ名                                               |
+| `runs-on`           | Ubuntu の最新版を使用                                  |
+| `needs`             | `test-and-build` ジョブの完了を待つ                    |
+
+**needs フィールドの役割:**
+
+- ジョブはデフォルトで並列実行される
+- `needs` を指定することで、ジョブの実行順序を制御できる
+- `test-and-build` が完了してから `deploy` を実行
+
+**複数のジョブに依存させる例:**
+
+```yaml
+needs:
+  - test-and-build
+  - security-scan
+```
+
+このように記述すると、すべてのジョブが完了してから実行されます。
+
+**ステップの説明:**
+
+1. **Checkout code**: ソースコードをチェックアウト
+2. **Configure AWS Credentials**: AWS への認証
+   - デプロイジョブでも AWS リソース(ECS、タスク定義)にアクセスするため必要
+   - 環境変数とシークレットは既に定義済みなのでそのまま使用可能
+
+---
+
+### 14.4 ジョブ間でのデータ共有(アーティファクト)
+
+#### 14.4.1 問題の確認
+
+**課題:**
+
+- `deploy` ジョブでは、ECR にプッシュしたイメージの URI が必要
+- イメージ URI の形式: `<ECRレジストリ>/<リポジトリ名>:<コミットSHA>`
+- しかし、`ECR_REGISTRY` の値は `test-and-build` ジョブ内でのみ定義されている
+
+**ジョブの独立性:**
+
+- 各ジョブは異なるランナー(仮想マシン)で実行される
+- ジョブ間でデータや変数を直接共有することはできない
+
+#### 14.4.2 解決方法: アーティファクトの使用
+
+**アーティファクト(Artifact)とは:**
+
+- GitHub Actions が提供する特別なストレージ領域
+- ジョブの実行結果(ファイル)を保存・共有できる
+- ジョブをまたいでデータをやり取りする仕組み
+
+**データ共有の流れ:**
+
+```
+┌──────────────────────────┐
+│ test-and-build ジョブ    │
+│                          │
+│ 1. イメージURIを取得     │
+│ 2. テキストファイルに保存│
+│ 3. アーティファクトに     │
+│    アップロード          │
+└────────────┬─────────────┘
+             │
+             ▼
+      ┌─────────────┐
+      │ Artifact    │
+      │ (Storage)   │
+      └─────────────┘
+             │
+             ▼
+┌──────────────────────────┐
+│ deploy ジョブ            │
+│                          │
+│ 1. アーティファクトから  │
+│    ダウンロード          │
+│ 2. テキストファイルを読取│
+│ 3. 環境変数に設定        │
+└──────────────────────────┘
+```
+
+---
+
+### 14.5 イメージ URI のアーティファクトへのアップロード
+
+#### 14.5.1 test-and-build ジョブにステップを追加
+
+`test-and-build` ジョブの最後(「Push Image to ECR」ステップの後)に、以下のステップを追加します:
+
+**ステップ1: イメージ URI をファイルに保存**
+
+```yaml
+      - name: Push the image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker image tag temp_api_image:latest $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          docker image push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          echo $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.sha }} > api-image-uri.txt
+
+      - name: Upload the image uri file as an artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: api-image-uri
+          path: cicd-section/api/api-image-uri.txt
+```
+
+#### 14.5.2 詳細説明
+
+**イメージ URI をファイルに保存:**
+
+```bash
+echo $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.sha }} > api-image-uri.txt
+```
+
+**コマンドの説明:**
+
+| 部分                  | 説明                                                 |
+| --------------------- | ---------------------------------------------------- |
+| `echo`                | 指定した文字列を出力するコマンド                     |
+| `$ECR_REGISTRY/...`   | 出力する文字列(イメージの完全な URI)                 |
+| `>`                   | リダイレクト演算子(出力をファイルに書き込む)         |
+| `api-image-uri.txt`   | 作成するテキストファイルの名前                       |
+
+**例:**
+
+実行結果として、`api-image-uri.txt` ファイルに以下の内容が保存されます:
+
+```
+123456789012.dkr.ecr.us-west-2.amazonaws.com/my-app-api:5364a8c1b2e3...
+```
+
+> **Linux コマンドの補足:**
+>
+> - `echo $PATH > path.txt`: PATH 環境変数の内容を path.txt に保存
+> - `>` 演算子は、コマンドの出力をファイルにリダイレクト(書き込み)する
+
+**アーティファクトへのアップロード:**
+
+```yaml
+- name: Upload the image uri file as an artifact
+  uses: actions/upload-artifact@v2
+  with:
+    name: api-image-uri
+    path: cicd-section/api/api-image-uri.txt
+```
+
+**パラメータの説明:**
+
+| パラメータ | 値                              | 説明                                       |
+| ---------- | ------------------------------- | ------------------------------------------ |
+| `uses`     | `actions/upload-artifact@v2`    | GitHub 公式のアーティファクトアップロード  |
+| `name`     | `api-image-uri`                 | アーティファクトの識別名(任意に命名可能)   |
+| `path`     | `cicd-section/api/api-image-uri.txt` | アップロードするファイルのパス        |
+
+> **重要な注意事項:**
+>
+> `path` には**絶対パス**または**リポジトリルートからの相対パス**を指定する必要があります。
+>
+> - `defaults.run.working-directory` の設定は `uses` アクションには適用されません
+> - `run` コマンドでは `working-directory` が有効
+> - `uses` アクションでは無効
+>
+> したがって、`cicd-section/api/` を明示的に含める必要があります。
+
+---
+
+### 14.6 イメージ URI のアーティファクトからのダウンロード
+
+#### 14.6.1 deploy ジョブにステップを追加
+
+AWS 認証の後に、以下のステップを追加します:
+
+```yaml
+      - name: Download the artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: api-image-uri
+          path: artifacts
+
+      - name: Define the image URI
+        run: |
+          echo "API_IMAGE_URI=$(cat artifacts/api-image-uri.txt)" >> $GITHUB_ENV
+```
+
+#### 14.6.2 詳細説明
+
+**アーティファクトのダウンロード:**
+
+```yaml
+- name: Download the artifact
+  uses: actions/download-artifact@v2
+  with:
+    name: api-image-uri
+    path: artifacts
+```
+
+**パラメータの説明:**
+
+| パラメータ | 値                           | 説明                                     |
+| ---------- | ---------------------------- | ---------------------------------------- |
+| `uses`     | `actions/download-artifact@v2` | GitHub 公式のダウンロードアクション      |
+| `name`     | `api-image-uri`              | アップロード時に指定した識別名と同じ     |
+| `path`     | `artifacts`                  | ダウンロード先のディレクトリ             |
+
+**結果:**
+
+- `artifacts/api-image-uri.txt` にイメージ URI が保存されます
+
+**環境変数への設定:**
+
+```bash
+echo "API_IMAGE_URI=$(cat artifacts/api-image-uri.txt)" >> $GITHUB_ENV
+```
+
+**コマンドの分解:**
+
+1. **`cat artifacts/api-image-uri.txt`**
+   - `cat` コマンドでファイルの内容を読み取り
+   - ファイルの中身: `123456789012.dkr.ecr.us-west-2.amazonaws.com/my-app-api:5364a8c...`
+
+2. **`$(...)` - コマンド置換**
+   - `$()` 内のコマンドを実行し、その出力を文字列として展開
+   - 結果: ファイルの中身が文字列として使用される
+
+3. **`echo "API_IMAGE_URI=..."`**
+   - 以下の形式の文字列を出力:
+     ```
+     API_IMAGE_URI=123456789012.dkr.ecr.us-west-2.amazonaws.com/my-app-api:5364a8c...
+     ```
+
+4. **`>> $GITHUB_ENV`**
+   - `$GITHUB_ENV` は GitHub Actions の特殊な環境変数
+   - この環境変数にリダイレクトすると、後続のステップで環境変数として使用可能になる
+
+**結果:**
+
+以降のステップで `${{ env.API_IMAGE_URI }}` としてイメージ URI にアクセスできるようになります。
+
+---
+
+### 14.7 タスク定義の更新
+
+#### 14.7.1 タスク定義のレンダリング
+
+イメージ URI を取得したので、タスク定義 JSON の `image` フィールドを更新します。
+
+**deploy ジョブに以下のステップを追加:**
+
+```yaml
+      - name: Fill in the new image URI in the amazon ECS task definition
+        id: render-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ env.ECS_TASK_DEFINITION_API }}
+          container-name: api
+          image: ${{ env.API_IMAGE_URI }}
+```
+
+#### 14.7.2 詳細説明
+
+**パラメータの説明:**
+
+| パラメータ        | 値                                   | 説明                                     |
+| ----------------- | ------------------------------------ | ---------------------------------------- |
+| `id`              | `render-task-def`                    | このステップの ID(後続ステップで参照)    |
+| `uses`            | `aws-actions/amazon-ecs-render-task-definition@v1` | AWS 公式のタスク定義レンダリングアクション |
+| `task-definition` | `${{ env.ECS_TASK_DEFINITION_API }}` | タスク定義テンプレート JSON のパス       |
+| `container-name`  | `api`                                | 更新対象のコンテナ名                     |
+| `image`           | `${{ env.API_IMAGE_URI }}`           | 新しいイメージ URI                       |
+
+**環境変数の確認:**
+
+`ECS_TASK_DEFINITION_API` は、ワークフローファイルの冒頭で定義済み:
+
+```yaml
+env:
+  ECS_TASK_DEFINITION_API: cicd-section/.aws/task-definition.json
+```
+
+**このステップの動作:**
+
+1. `task-definition` で指定された JSON ファイルを読み込む
+2. `container-name` で指定されたコンテナの `image` フィールドを検索
+3. `image` パラメータで指定された URI に書き換え
+4. 新しいタスク定義 JSON を出力(このステップの outputs に保存)
+
+**id の使用目的:**
+
+- 次のステップでこのステップの出力(更新されたタスク定義 JSON)を参照するため
+- `steps.render-task-def.outputs.task-definition` として参照可能
+
+---
+
+### 14.8 ECS サービスへのデプロイ
+
+#### 14.8.1 デプロイステップの追加
+
+最後に、更新したタスク定義を使用して ECS サービスにデプロイします。
+
+**deploy ジョブに以下のステップを追加:**
+
+```yaml
+      - name: Deploy ECS task
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+```
+
+#### 14.8.2 詳細説明
+
+**パラメータの説明:**
+
+| パラメータ                   | 値                                            | 説明                                         |
+| ---------------------------- | --------------------------------------------- | -------------------------------------------- |
+| `uses`                       | `aws-actions/amazon-ecs-deploy-task-definition@v1` | AWS 公式の ECS デプロイアクション            |
+| `task-definition`            | `${{ steps.render-task-def.outputs.task-definition }}` | 前ステップで作成した新しいタスク定義         |
+| `service`                    | `${{ env.ECS_SERVICE }}`                      | デプロイ対象の ECS サービス名                |
+| `cluster`                    | `${{ env.ECS_CLUSTER }}`                      | ECS クラスター名                             |
+| `wait-for-service-stability` | `true`                                        | デプロイ完了まで待機するかどうか             |
+
+**前ステップの出力の参照:**
+
+```yaml
+task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+```
+
+- `steps`: 現在のジョブ内のステップを参照
+- `render-task-def`: 前ステップの ID
+- `outputs`: ステップの出力データ
+- `task-definition`: 出力データのキー(更新されたタスク定義 JSON)
+
+> **outputs の詳細:**
+>
+> 各アクションがどのような outputs を提供しているかは、そのアクションの公式ドキュメントで確認できます。
+>
+> - GitHub Marketplace でアクションを検索
+> - README の「Outputs」セクションを確認
+
+**wait-for-service-stability の役割:**
+
+| 値      | 動作                                                   |
+| ------- | ------------------------------------------------------ |
+| `true`  | デプロイが完了し、サービスが安定するまで待機           |
+| `false` | デプロイをトリガーしてすぐに次のステップへ進む(非推奨) |
+
+**推奨設定:** `true`
+
+- デプロイが成功したことを確認してからパイプラインを完了
+- エラーが発生した場合、パイプラインが失敗として報告される
+
+---
+
+### 14.9 ワークフローファイルの完成形
+
+#### 14.9.1 deploy ジョブ全体
+
+これまでの内容をまとめた `deploy` ジョブの完成形:
+
+```yaml
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [test-and-build]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+
+      - name: Download the artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: api-image-uri
+          path: artifacts
+
+      - name: Define the image URI
+        run: |
+          echo "API_IMAGE_URI=$(cat artifacts/api-image-uri.txt)" >> $GITHUB_ENV
+
+      - name: Fill in the new image URI in the amazon ECS task definition
+        id: render-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ env.ECS_TASK_DEFINITION_API }}
+          container-name: api
+          image: ${{ env.API_IMAGE_URI }}
+
+      - name: Deploy ECS task
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+```
+
+#### 14.9.2 ワークフロー全体の流れ
+
+```
+┌────────────────────────────────────┐
+│ test-and-build ジョブ              │
+├────────────────────────────────────┤
+│ 1. コードチェックアウト            │
+│ 2. テスト & イメージビルド         │
+│ 3. AWS 認証                        │
+│ 4. ECR ログイン                    │
+│ 5. イメージをECRにプッシュ         │
+│ 6. イメージURIをファイルに保存     │
+│ 7. アーティファクトにアップロード  │
+└────────────────┬───────────────────┘
+                 │ needs
+                 ▼
+┌────────────────────────────────────┐
+│ deploy ジョブ                      │
+├────────────────────────────────────┤
+│ 1. コードチェックアウト            │
+│ 2. AWS 認証                        │
+│ 3. アーティファクトをダウンロード  │
+│ 4. イメージURIを環境変数に設定     │
+│ 5. タスク定義のレンダリング        │
+│ 6. ECS サービスにデプロイ          │
+└────────────────────────────────────┘
+```
+
+#### 14.9.3 ファイルの保存
+
+1. `ci-cd.yml` ファイルを保存します(`Ctrl + S`)
+
+---
+
+### 14.10 次のステップ
+
+これで CD パイプラインのワークフロー定義が完了しました。
+
+**次に必要な作業:**
+
+- タスク定義テンプレート JSON ファイルの作成
+- ワークフローで参照されている `cicd-section/.aws/task-def-api.json` を作成する必要があります
+
+次のセクションでは、タスク定義テンプレートファイルを作成します。
+
+---
+
+## 15. タスク定義テンプレート JSON ファイルの作成
+
+### 15.1 概要
+
+GitHub Actions ワークフローで参照するタスク定義のテンプレート JSON ファイルを作成します。このファイルは、デプロイ時にイメージ URI が動的に書き換えられるベースとなります。
+
+### 15.2 ディレクトリとファイルの作成
+
+#### 15.2.1 ターミナルを開く
+
+1. VS Code でターミナルを開きます
+2. リポジトリのルートディレクトリ(`ecs-learning-course`)にいることを確認します
+
+```bash
+pwd
+```
+
+**出力例:**
+
+```
+/Users/yourname/Desktop/ecs-learning-course
+```
+
+#### 15.2.2 ディレクトリの作成
+
+`.aws` ディレクトリを作成します:
+
+```bash
+mkdir -p cicd-section/.aws
+```
+
+**コマンドの説明:**
+
+| 部分                   | 説明                                          |
+| ---------------------- | --------------------------------------------- |
+| `mkdir`                | ディレクトリを作成するコマンド                |
+| `-p`                   | 親ディレクトリも含めて作成(存在しない場合)    |
+| `cicd-section/.aws`    | 作成するディレクトリのパス                    |
+
+> **補足:**
+>
+> - ディレクトリ名やネーミングルールに特別な制限はありません
+> - ワークフローファイルで指定したパスと一致していれば問題ありません
+
+#### 15.2.3 JSON ファイルの作成
+
+空の JSON ファイルを作成します:
+
+```bash
+touch cicd-section/.aws/task-def-api.json
+```
+
+**確認:**
+
+VS Code のエクスプローラーで、以下のディレクトリ構造が作成されていることを確認します:
+
+```
+ecs-learning-course/
+├── cicd-section/
+│   ├── .aws/
+│   │   └── task-def-api.json  ← 新規作成
+│   └── api/
+│       └── ...
+└── .github/
+    └── workflows/
+        └── cicd.yml
+```
+
+---
+
+### 15.3 AWS コンソールからタスク定義のエクスポート
+
+#### 15.3.1 ECS コンソールへアクセス
+
+1. AWS マネジメントコンソールで「**ECS**」を検索します
+2. 左側のメニューから「**タスク定義**」をクリックします
+
+#### 15.3.2 タスク定義の選択
+
+1. タスク定義ファミリー一覧から「**my-app-api**」をクリックします
+
+2. リビジョン一覧が表示されます
+   - 現時点では「**my-app-api:1**」のみが存在するはずです
+   - リビジョン 1 をクリックします
+
+#### 15.3.3 JSON のコピー
+
+1. タスク定義の詳細ページで「**JSON**」タブをクリックします
+
+2. JSON 内容が表示されます
+
+3. 「**クリップボードにコピー**」ボタンをクリックします
+
+---
+
+### 15.4 JSON ファイルの編集
+
+#### 15.4.1 VS Code でファイルを開く
+
+1. VS Code で `cicd-section/.aws/task-def-api.json` を開きます
+
+2. コピーした JSON を貼り付けます(`Ctrl + V`)
+
+#### 15.4.2 不要なフィールドの削除と値の調整
+
+AWS からエクスポートした JSON には、デプロイ時に不要なフィールドが含まれています。以下の手順で編集します。
+
+**1. taskDefinitionArn を削除**
+
+```json
+"taskDefinitionArn": "arn:aws:ecs:us-west-2:123456789012:task-definition/my-app-api:1",
+```
+
+この行を削除します。
+
+**理由:** 新しいタスク定義を登録する際、ARN は自動的に生成されるため不要
+
+---
+
+**2. コンテナ名を変更**
+
+`containerDefinitions` 配列内の `name` フィールドを確認します:
+
+```json
+"containerDefinitions": [
+  {
+    "name": "dummy",  ← これを変更
+    ...
+  }
+]
+```
+
+**変更前:**
+
+```json
+"name": "dummy",
+```
+
+**変更後:**
+
+```json
+"name": "api",
+```
+
+**理由:** ワークフローで `container-name: api` と指定しているため一致させる必要がある
+
+---
+
+**3. イメージ URI をプレースホルダーに変更**
+
+`image` フィールドの値を一時的なプレースホルダーに変更します:
+
+```json
+"image": "public.ecr.aws/nginx/nginx:stable-perl",
+```
+
+**変更後:**
+
+```json
+"image": "<IMAGE_URI>",
+```
+
+**理由:** このフィールドは GitHub Actions で動的に書き換えられるため、一時的な値で問題ありません
+
+---
+
+**4. ポートマッピングの設定**
+
+`portMappings` セクションを確認・修正します:
+
+**変更前:**
+
+```json
+"portMappings": [
+  {
+    "name": "dummy-80-tcp",
+    "containerPort": 80,
+    "hostPort": 80,
+    "protocol": "tcp",
+    "appProtocol": "http"
+  }
+]
+```
+
+**変更後:**
+
+```json
+"portMappings": [
+  {
+    "name": "api-8080-tcp",
+    "containerPort": 8080,
+    "hostPort": 8080,
+    "protocol": "tcp",
+    "appProtocol": "http"
+  }
+]
+```
+
+**変更内容:**
+
+| フィールド      | 変更前      | 変更後         | 理由                                   |
+| --------------- | ----------- | -------------- | -------------------------------------- |
+| `name`          | dummy-80-tcp | api-8080-tcp   | コンテナ名に合わせて変更               |
+| `containerPort` | 80          | 8080           | Spring Boot はデフォルトで 8080 を使用 |
+| `hostPort`      | 80          | 8080           | コンテナポートと一致させる             |
+
+---
+
+**5. taskRoleArn の削除(オプション)**
+
+35行目付近の `taskRoleArn` フィールドを削除します:
+
+```json
+"taskRoleArn": "arn:aws:iam::123456789012:role/ecsTaskExecutionRole",
+```
+
+**理由:**
+- AWS アカウント ID が含まれているため、GitHub に公開したくない
+- タスク実行ロールは `executionRoleArn` で指定されているため、こちらは不要
+
+---
+
+**6. revision フィールドの削除**
+
+```json
+"revision": 1,
+```
+
+この行を削除します。
+
+**理由:** 新しいタスク定義を登録する際、リビジョン番号は自動的に採番されるため不要
+
+---
+
+**7. requiresAttributes の削除**
+
+`requiresAttributes` 配列全体を削除します:
+
+```json
+"requiresAttributes": [
+  {
+    "name": "com.amazonaws.ecs.capability.logging-driver.awslogs"
+  },
+  ...
+],
+```
+
+**理由:** デプロイ時に不要な情報
+
+---
+
+**8. status フィールドの削除**
+
+```json
+"status": "ACTIVE",
+```
+
+この行を削除します。
+
+---
+
+**9. compatibilities の削除**
+
+```json
+"compatibilities": [
+  "EC2",
+  "FARGATE"
+],
+```
+
+この配列を削除します。
+
+---
+
+**10. CPU とメモリの確認**
+
+`cpu` と `memory` フィールドの値を確認します:
+
+```json
+"cpu": "512",
+"memory": "1024",
+```
+
+**これらの値はそのままでも OK です。必要に応じて変更してください:**
+
+| リソース | 値     | 説明                              |
+| -------- | ------ | --------------------------------- |
+| `cpu`    | "512"  | 0.5 vCPU(1024 = 1 vCPU)           |
+| `memory` | "1024" | 1 GB                              |
+
+> **変更例:**
+>
+> - より多くのリソースが必要な場合: `"cpu": "1024"`, `"memory": "2048"`
+> - リソースを削減したい場合: `"cpu": "256"`, `"memory": "512"`
+
+---
+
+**11. runtimePlatform の確認**
+
+```json
+"runtimePlatform": {
+  "cpuArchitecture": "X86_64",
+  "operatingSystemFamily": "LINUX"
+},
+```
+
+**このままでも OK です。ARM を使用する場合:**
+
+```json
+"cpuArchitecture": "ARM64"
+```
+
+に変更してください。
+
+---
+
+**12. registeredAt と registeredBy の削除**
+
+```json
+"registeredAt": "2025-12-13T01:23:45.678Z",
+"registeredBy": "arn:aws:iam::123456789012:user/admin",
+```
+
+これらの行を削除します。
+
+---
+
+**13. tags の削除**
+
+`tags` 配列がある場合は削除します:
+
+```json
+"tags": []
+```
+
+---
+
+**14. 最終行のカンマを削除**
+
+JSON の最終行に不要なカンマ(`,`)がないことを確認します:
+
+```json
+  "memory": "1024"
+}  ← カンマがないことを確認
+```
+
+---
+
+#### 15.4.3 編集後の JSON の全体像
+
+編集後、JSON は以下のような構造になるはずです:
+
+```json
+{
+  "family": "my-app-api",
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "<IMAGE_URI>",
+      "cpu": 0,
+      "portMappings": [
+        {
+          "name": "api-8080-tcp",
+          "containerPort": 8080,
+          "hostPort": 8080,
+          "protocol": "tcp",
+          "appProtocol": "http"
+        }
+      ],
+      "essential": true,
+      "environment": [],
+      "environmentFiles": [],
+      "mountPoints": [],
+      "volumesFrom": [],
+      "ulimits": [],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/my-app-api",
+          "mode": "non-blocking",
+          "awslogs-create-group": "true",
+          "max-buffer-size": "25m",
+          "awslogs-region": "us-west-2",
+          "awslogs-stream-prefix": "ecs"
+        },
+        "secretOptions": []
+      },
+      "systemControls": []
+    }
+  ],
+  "executionRoleArn": "arn:aws:iam::123456789012:role/ecsTaskExecutionRole",
+  "networkMode": "awsvpc",
+  "placementConstraints": [],
+  "cpu": "512",
+  "memory": "1024",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  }
+}
+```
+
+**行数の確認:**
+
+- 全体で約 48 行程度になるはずです
+- 行数が大きく異なる場合、削除漏れがないか確認してください
+
+#### 15.4.4 ファイルの保存
+
+1. `Ctrl + S` でファイルを保存します
+
+---
+
+### 15.5 GitHub へのプッシュとパイプラインの実行
+
+#### 15.5.1 変更内容の確認
+
+```bash
+git status
+```
+
+**出力例:**
+
+```
+On branch main
+Changes not staged for commit:
+  modified:   .github/workflows/cicd.yml
+
+Untracked files:
+  cicd-section/.aws/
+```
+
+- `cicd.yml`: 編集済み
+- `cicd-section/.aws/`: 新規作成(未追跡)
+
+#### 15.5.2 変更をステージング
+
+```bash
+git add .
+```
+
+すべての変更をステージングエリアに追加します。
+
+#### 15.5.3 ステージング状態の確認
+
+```bash
+git status
+```
+
+**出力例:**
+
+```
+On branch main
+Changes to be committed:
+  modified:   .github/workflows/cicd.yml
+  new file:   cicd-section/.aws/task-def-api.json
+```
+
+#### 15.5.4 コミットの作成
+
+```bash
+git commit -m "Add ECS deploy workflow and task definition template"
+```
+
+**出力例:**
+
+```
+[main xxxxxxxx] Add ECS deploy workflow and task definition template
+ 2 files changed, 150 insertions(+)
+ create mode 100644 cicd-section/.aws/task-def-api.json
+```
+
+#### 15.5.5 リモートリポジトリへプッシュ
+
+```bash
+git push origin main
+```
+
+**出力例:**
+
+```
+Enumerating objects: 10, done.
+Counting objects: 100% (10/10), done.
+Delta compression using up to 8 threads
+Compressing objects: 100% (6/6), done.
+Writing objects: 100% (7/7), 1.23 KiB | 1.23 MiB/s, done.
+Total 7 (delta 2), reused 0 (delta 0), pack-reused 0
+To https://github.com/yourname/ecs-learning-course.git
+   xxxxxxxx..yyyyyyyy  main -> main
+```
+
+プッシュが完了すると、GitHub Actions が自動的にワークフローを実行開始します。
+
+---
+
+### 15.6 パイプラインの実行確認
+
+#### 15.6.1 GitHub Actions ページへアクセス
+
+1. GitHub のリポジトリページにアクセスします
+2. 「**Actions**」タブをクリックします
+
+#### 15.6.2 ワークフロー実行の確認
+
+最新のワークフロー実行が表示されます:
+
+- コミットメッセージ: 「Add ECS deploy workflow and task definition template」
+- ステータス: 実行中(黄色)または完了(緑色/赤色)
+
+#### 15.6.3 予想されるエラー
+
+> **重要な注意事項:**
+>
+> この時点では、パイプラインは**deploy ジョブで失敗する**ことが予想されます。
+>
+> **失敗の理由:**
+>
+> - IAM ロールに必要な権限が不足している
+> - 具体的には、`iam:PassRole` 権限が不足
+
+---
+
+## 16. デプロイエラーの確認と原因分析
+
+### 16.1 概要
+
+前のセクションでパイプラインを実行したところ、テストビルドは成功しますが、デプロイジョブで失敗します。このセクションでは、エラーの詳細を確認し、原因を特定します。
+
+### 16.2 エラーの確認手順
+
+#### 16.2.1 ワークフロー実行結果の確認
+
+1. GitHub リポジトリの「**Actions**」タブにアクセスします
+2. 最新のワークフロー実行をクリックします
+3. 実行結果を確認します:
+   - **test-build** ジョブ: ✅ 成功(緑色のチェックマーク)
+   - **deploy** ジョブ: ❌ 失敗(赤色のバツマーク)
+
+#### 16.2.2 失敗したジョブの詳細確認
+
+1. **deploy** ジョブをクリックして詳細を表示します
+2. ジョブの各ステップが表示されます
+3. 失敗したステップを確認します:
+   - **Deploy to ECS task** というステップで失敗しています
+
+#### 16.2.3 エラーメッセージの確認
+
+失敗したステップを展開すると、以下のようなエラーメッセージが表示されます:
+
+```
+タスク定義の登録に失敗しました
+```
+
+エラーの詳細を確認すると:
+
+```
+User: arn:aws:sts::xxxxxxxxxxxx:assumed-role/GitHubActionsEcsLearningCourse/GitHubActions 
+is not authorized to perform: iam:PassRole on resource: 
+arn:aws:iam::xxxxxxxxxxxx:role/ecsTaskExecutionRole
+```
+
+**エラーの意味:**
+
+- `GitHubActionsEcsLearningCourse` ロール(OIDC 用に作成したロール)に、`iam:PassRole` アクションを実行する権限がありません
+- `ecsTaskExecutionRole` に対して PassRole を実行できないため、タスク定義の登録が失敗しています
+
+---
+
+## 17. iam:PassRole 権限の理解
+
+### 17.1 PassRole とは
+
+#### 17.1.1 PassRole の役割
+
+**PassRole** とは、AWS のリソース(ここでは ECS タスク)に対して、別の IAM ロールを渡す(割り当てる)権限のことです。
+
+#### 17.1.2 なぜ PassRole が必要なのか
+
+**タスク定義における executionRoleArn の確認:**
+
+以前作成したタスク定義ファイル `task-def-api.json` の 35 行目付近を確認すると:
+
+```json
+{
+  "executionRoleArn": "arn:aws:iam::xxxxxxxxxxxx:role/ecsTaskExecutionRole",
+  ...
+}
+```
+
+このように、**executionRoleArn** で `ecsTaskExecutionRole` を指定しています。
+
+**executionRoleArn の意味:**
+
+- ECS タスクが実行されるときに、そのタスクに与えられる IAM ロールを指定しています
+- つまり、ECS タスクに対して `ecsTaskExecutionRole` という権限を**渡している**ことになります
+
+**PassRole が重要な理由:**
+
+権限を他のリソースに渡す行為自体が、非常に強力で重要な操作です。そのため、AWS では以下のようなセキュリティポリシーが適用されています:
+
+- デフォルトでは、他のリソースに対してロールを渡すことは**禁止**されています
+- 明示的に `iam:PassRole` 権限を付与することで、初めてロールを渡すことが許可されます
+
+**今回のケース:**
+
+- GitHub Actions が使用する `GitHubActionsEcsLearningCourse` ロールは、ECS タスクに対して `ecsTaskExecutionRole` を渡そうとしています
+- しかし、`GitHubActionsEcsLearningCourse` ロールに `iam:PassRole` 権限が付与されていないため、エラーが発生しています
+
+### 17.2 必要な対応
+
+`GitHubActionsEcsLearningCourse` ロールに対して、以下の権限を追加する必要があります:
+
+- **アクション**: `iam:PassRole`
+- **リソース**: `ecsTaskExecutionRole`(渡すことを許可するロール)
+
+---
+
+## 18. IAM ロールへの PassRole 権限の追加
+
+### 18.1 概要
+
+`GitHubActionsEcsLearningCourse` ロールに `iam:PassRole` 権限を追加し、ECS タスクに対して `ecsTaskExecutionRole` を渡せるようにします。
+
+### 18.2 手順
+
+#### 18.2.1 IAM コンソールへアクセス
+
+1. AWS マネジメントコンソールで「**IAM**」を検索し、選択します
+
+#### 18.2.2 ロールの選択
+
+1. 左側のメニューから「**ロール**」をクリックします
+2. ロール一覧から `GitHubActionsEcsLearningCourse` を検索し、クリックします
+
+#### 18.2.3 既存のポリシーの確認
+
+**許可ポリシー**セクションで、以下のポリシーがアタッチされていることを確認します:
+
+- カスタマーインライン形式のポリシーが 1 つ存在します
+  - これは以前のセクションで追加したポリシーです
+  - タスク定義の書き換え、ECR へのファイルアップロードなどの権限を含んでいます
+
+#### 18.2.4 ポリシーの編集
+
+1. カスタマーインラインポリシーの名前をクリックします
+2. 「**編集**」ボタンをクリックします
+
+#### 18.2.5 編集モードの選択
+
+**JSON** タブで編集することもできますが、今回は**ビジュアルエディタ**を使用します:
+
+1. 「**ビジュアル**」タブをクリックします
+
+#### 18.2.6 新しい許可の追加
+
+1. 「**許可を追加**」ボタンをクリックします
+2. 「**サービスを選択**」で以下を設定します:
+
+**サービス:**
+
+- 検索ボックスに「**IAM**」と入力します
+- 「**IAM**」を選択します
+
+**アクション:**
+
+1. 「**アクション**」セクションで、検索ボックスに「**PassRole**」と入力します
+2. 「**PassRole**」にチェックを入れます
+
+#### 18.2.7 リソースの指定
+
+「**リソース**」セクションで、PassRole を許可するロールを指定します:
+
+**リソースタイプの選択:**
+
+- 「**特定**」を選択します
+  - すべてのロールを渡せるようにするのはセキュリティ上好ましくないため、特定のロールのみに制限します
+
+**ARN の追加:**
+
+1. 「**ARN を追加**」をクリックします
+2. 「**リソース ARN を指定**」ダイアログが表示されます
+3. 「**ロール名**」フィールドに以下を入力します:
+
+```
+ecsTaskExecutionRole
+```
+
+4. ARN が自動的に表示されることを確認します:
+
+```
+arn:aws:iam::xxxxxxxxxxxx:role/ecsTaskExecutionRole
+```
+
+5. 「**ARN を追加**」ボタンをクリックします
+
+#### 18.2.8 設定の確認
+
+リソースセクションに以下が追加されたことを確認します:
+
+```
+arn:aws:iam::xxxxxxxxxxxx:role/ecsTaskExecutionRole
+```
+
+#### 18.2.9 ポリシーの保存
+
+1. 「**次へ**」ボタンをクリックします
+2. ポリシーの内容を確認します
+3. 「**変更を保存**」ボタンをクリックします
+
+#### 18.2.10 更新後のポリシーの確認
+
+**許可ポリシー**セクションで、カスタマーインラインポリシーをクリックして内容を確認します:
+
+**確認事項:**
+
+- ビジュアルエディタで編集したため、JSON のフォーマットが若干変わっている可能性があります
+- しかし、**内容自体は変わっていません**(既存の権限はそのまま残っています)
+- 重要なのは、以下の新しい権限が追加されていることです:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": "iam:PassRole",
+  "Resource": "arn:aws:iam::xxxxxxxxxxxx:role/ecsTaskExecutionRole"
+}
+```
+
+---
+
+## 19. パイプラインの再実行
+
+### 19.1 概要
+
+IAM ロールに PassRole 権限を追加したので、再度パイプラインを実行します。今回は JSON や YAML ファイルを変更していないため、コミットやプッシュは不要です。GitHub Actions の UI から直接再実行します。
+
+### 19.2 手順
+
+#### 19.2.1 ワークフローの再実行
+
+1. GitHub リポジトリの「**Actions**」タブにアクセスします
+2. 失敗したワークフロー実行をクリックします
+3. 画面右上の「**Re-run jobs**」(再実行)ボタンをクリックします
+4. 「**Re-run failed jobs**」(失敗したジョブを再実行)を選択します
+
+> **補足:**
+>
+> - 「Re-run all jobs」を選択すると、すべてのジョブが再実行されます
+> - 今回は **test-build** ジョブは既に成功しているため、「Re-run failed jobs」を選択することで、**deploy** ジョブのみが再実行されます
+
+#### 19.2.2 確認ダイアログ
+
+確認ダイアログが表示されたら、「**Re-run jobs**」ボタンをクリックします。
+
+#### 19.2.3 実行の確認
+
+- **deploy** ジョブのみが再実行されます
+- **test-build** ジョブは成功のまま(緑色のチェックマーク)で残ります
+
+#### 19.2.4 実行完了の待機
+
+デプロイジョブの実行には約 3 分程度かかります。しばらく待ちます。
+
+### 19.3 実行結果の確認
+
+#### 19.3.1 成功の確認
+
+約 3 分後、GitHub Actions ページを確認します:
+
+- **test-build** ジョブ: ✅ 成功(緑色のチェックマーク)
+- **deploy** ジョブ: ✅ 成功(緑色のチェックマーク)
+
+両方のジョブが成功していれば、ECS へのデプロイが完了しています。
+
+#### 19.3.2 デプロイの意味
+
+デプロイが完了したということは:
+
+- Docker イメージが ECR にプッシュされました
+- タスク定義が新しいリビジョンで更新されました
+- ECS サービスが新しいタスク定義を使用して、新しいタスク(コンテナ)を起動しました
+
+---
+
+## 21. デプロイ状態の確認
+
+### 21.1 概要
+
+パイプラインが成功したので、ECS 上でタスク定義とサービスが正しく更新されているか確認します。
+
+### 21.2 タスク定義の確認
+
+#### 21.2.1 タスク定義一覧へアクセス
+
+1. AWS マネジメントコンソールで「**ECS**」を開きます
+2. 左側のメニューから「**タスク定義**」をクリックします
+
+#### 21.2.2 タスク定義のリビジョン確認
+
+1. タスク定義ファミリー一覧から `my-app-api` をクリックします
+2. リビジョン一覧が表示されます
+3. **リビジョン番号が増えている**ことを確認します
+   - 例: リビジョン 1、リビジョン 2、リビジョン 3...
+   - CI/CD パイプラインが実行されるたびに、新しいリビジョンが作成されます
+
+#### 21.2.3 最新リビジョンの内容確認
+
+1. **最新のリビジョン**(番号が最も大きいもの)をクリックします
+2. 画面右上の「**JSON**」タブをクリックします
+
+#### 21.2.4 JSON の確認
+
+JSON の内容を確認し、以下のポイントをチェックします:
+
+**1. コンテナ名の確認:**
+
+`containerDefinitions` セクションの `name` フィールドを確認します:
+
+```json
+{
+  "containerDefinitions": [
+    {
+      "name": "api",
+      ...
+    }
+  ]
+}
+```
+
+- コンテナ名が `api` になっていることを確認します
+- 以前のダミーコンテナ名 `dummy` から更新されています
+
+**2. イメージ URI の確認:**
+
+`containerDefinitions` セクションの `image` フィールドを確認します:
+
+```json
+{
+  "containerDefinitions": [
+    {
+      "image": "xxxxxxxxxxxx.dkr.ecr.ap-northeast-1.amazonaws.com/my-app-api:<COMMIT_HASH>",
+      ...
+    }
+  ]
+}
+```
+
+**確認事項:**
+
+- ECR のドメイン(`xxxxxxxxxxxx.dkr.ecr.ap-northeast-1.amazonaws.com`)が含まれています
+- リポジトリ名 `my-app-api` が含まれています
+- タグ部分には **GitHub のコミットハッシュ値**が使用されています
+  - 例: `a1b2c3d4e5f6...`
+  - これにより、どのコミットからビルドされたイメージかを追跡できます
+
+> **補足:**
+>
+> - 以前は `public.ecr.aws/nginx/nginx:stable-perl` という NGINX のイメージを使用していました
+> - CI/CD パイプラインにより、ECR の Spring Boot イメージに正しく更新されています
+
+### 21.3 ECS サービスとタスクの確認
+
+#### 21.3.1 クラスターへアクセス
+
+1. ECS コンソールの左側メニューから「**クラスター**」をクリックします
+2. クラスター一覧から `my-app-cluster` をクリックします
+
+#### 21.3.2 サービスの確認
+
+1. 「**サービス**」タブをクリックします
+2. サービス一覧から `my-app-api-service` をクリックします
+
+#### 21.3.3 実行中のタスクの確認
+
+1. 「**タスク**」タブをクリックします
+2. タスク一覧を確認します:
+   - タスクが **1 つ実行中(RUNNING)**になっていることを確認します
+
+#### 21.3.4 タスク詳細の確認
+
+1. 実行中のタスクの **タスク ID**(リンク)をクリックします
+2. タスク詳細ページが表示されます
+
+**確認事項:**
+
+**ステータス:**
+
+- **ラストステータス**: `RUNNING`(実行中)
+
+**ヘルスステータス:**
+
+- **ヘルスステータス**: `UNKNOWN`(不明)
+
+> **ヘルスステータスが「不明」である理由:**
+>
+> これは**問題ありません**。以下の理由により「不明」と表示されます:
+>
+> - ヘルスステータスは、タスク定義ファイルに**ヘルスチェックコマンド**を定義した場合にのみ有効になります
+> - 今回のタスク定義では、ヘルスチェックコマンドを定義していないため、「不明」が表示されます
+> - これは期待通りの動作です
+>
+> **ヘルスチェックとの違い:**
+>
+> - この「ヘルスステータス」は、以前のブルー/グリーンデプロイで使用した **ターゲットグループのヘルスチェック**とは別物です
+> - タスク定義ファイルに `healthCheck` セクションを追加することで、独自のヘルスチェックを定義できます
+> - 例: `curl` コマンドで API エンドポイントにアクセスするシェルスクリプトを実行
+>
+> **参考(ヘルスチェックの定義例):**
+>
+> ```json
+> {
+>   "healthCheck": {
+>     "command": ["CMD-SHELL", "curl -f http://localhost:8080/api/hello || exit 1"],
+>     "interval": 30,
+>     "timeout": 5,
+>     "retries": 3,
+>     "startPeriod": 60
+>   }
+> }
+> ```
+
+---
+
+## 22. アプリケーションへのアクセス(初回失敗)
+
+### 22.1 パブリック IP の取得
+
+#### 22.1.1 パブリック IP のコピー
+
+タスク詳細ページの「**ネットワーキング**」セクションで、以下を確認します:
+
+- **パブリック IP**: タスクに割り当てられたパブリック IP アドレスが表示されています
+  - 例: `54.123.45.67`
+
+パブリック IP をコピーします。
+
+### 22.2 ブラウザでのアクセス
+
+#### 22.2.1 URL の構築
+
+ブラウザで新しいタブを開き、以下の形式で URL を入力します:
+
+```
+http://<パブリックIP>:8080/api/hello
+```
+
+**URL の構成要素:**
+
+- `http://`: プロトコル
+- `<パブリックIP>`: コピーしたパブリック IP アドレス
+- `:8080`: Spring Boot アプリケーションが起動しているポート番号
+- `/api/hello`: API エンドポイントのパス
+
+**例:**
+
+```
+http://54.123.45.67:8080/api/hello
+```
+
+#### 22.2.2 アクセス結果
+
+Enter キーを押してアクセスすると:
+
+- **ページが読み込み中のまま**(グルグルマーク)になります
+- タイムアウトまで待っても、レスポンスが返ってきません
+
+### 22.3 問題の原因
+
+**セキュリティグループの設定不足:**
+
+現在、セキュリティグループは **80 番ポートのみ**を許可しており、**8080 番ポートへのアクセスは許可されていません**。
+
+そのため、セキュリティグループのファイアウォールによってアクセスがブロックされています。
+
+**なぜ 80 番ポートだけが許可されているのか:**
+
+- ECS サービス作成時に、セキュリティグループで HTTP(80 番ポート)のインバウンドルールを設定しました
+- これは、以前のダミー NGINX コンテナが 80 番ポートで動作していたためです
+- しかし、Spring Boot アプリケーションは **8080 番ポート**で動作するため、8080 番ポートへのアクセスを許可する必要があります
+
+---
+
+## 23. セキュリティグループの修正
+
+### 23.1 概要
+
+セキュリティグループのインバウンドルールを編集し、8080 番ポートへのアクセスを許可します。同時に、不要になった 80 番ポートのルールを削除します。
+
+### 23.2 手順
+
+#### 23.2.1 セキュリティグループへのアクセス
+
+**方法 1: ECS サービスから直接アクセス**
+
+1. ECS コンソールで「クラスター」→「my-app-cluster」→「サービス」→「my-app-api-service」をクリックします
+2. 「**設定とネットワーキング**」タブをクリックします
+3. 「**ネットワーキング**」セクションで、「**セキュリティグループ**」のリンク(青色のリンク)をクリックします
+   - セキュリティグループ ID(例: `sg-xxxxxxxxxxxx`)が表示されています
+4. 新しいタブ/ウィンドウで、セキュリティグループの詳細ページが開きます
+
+**方法 2: EC2 コンソールから検索**
+
+1. AWS マネジメントコンソールで「**EC2**」を開きます
+2. 左側のメニューから「**セキュリティグループ**」をクリックします
+3. セキュリティグループ一覧から `my-app-api-sg` を検索し、クリックします
+
+#### 23.2.2 現在のインバウンドルールの確認
+
+セキュリティグループ詳細ページの「**インバウンドルール**」タブをクリックします。
+
+**現在のルール:**
+
+| タイプ | プロトコル | ポート範囲 | ソース      | 説明               |
+| ------ | ---------- | ---------- | ----------- | ------------------ |
+| HTTP   | TCP        | 80         | 0.0.0.0/0   | HTTP アクセス許可  |
+| HTTP   | TCP        | 80         | ::/0        | HTTP アクセス許可  |
+
+> **補足:**
+>
+> - `0.0.0.0/0`: すべての IPv4 アドレスからのアクセスを許可
+> - `::/0`: すべての IPv6 アドレスからのアクセスを許可
+> - 現在は 80 番ポートのみが許可されています
+
+#### 23.2.3 インバウンドルールの編集
+
+1. 「**インバウンドルールを編集**」ボタンをクリックします
+
+#### 23.2.4 新しいルールの追加(8080 番ポート)
+
+1. 「**ルールを追加**」ボタンをクリックします
+2. 新しいルールに以下を設定します:
+
+**タイプ:**
+
+- 「**カスタム TCP**」を選択します
+
+**ポート範囲:**
+
+```
+8080
+```
+
+**ソース:**
+
+- 「**Anywhere-IPv4**」を選択します
+  - 自動的に `0.0.0.0/0` が設定されます
+
+> **セキュリティに関する注意:**
+>
+> - より厳格なセキュリティ設定が必要な場合は、「**カスタム**」を選択し、自分の IP アドレスのみを許可することを推奨します
+> - 例: `123.456.78.90/32`(自分の固定 IP アドレス)
+> - このコースでは設定を簡略化するため、すべての IP アドレスからのアクセスを許可しています
+
+**説明(オプション):**
+
+```
+Allow Spring Boot API access on port 8080
+```
+
+#### 23.2.5 不要なルールの削除(80 番ポート)
+
+80 番ポートのルールは、NGINX コンテナ用に設定したものであり、現在は不要です:
+
+1. 80 番ポートのルール(IPv4 と IPv6 の両方)の右端にある「**削除**」ボタンをクリックします
+2. 両方の 80 番ポートルールを削除します
+
+> **セキュリティのベストプラクティス:**
+>
+> - 不要なポートは開放しないことが、セキュリティ上重要です
+> - 使用しないポートを閉じることで、攻撃対象領域を減らすことができます
+
+#### 23.2.6 ルールの保存
+
+1. 「**ルールを保存**」ボタンをクリックします
+2. インバウンドルールが更新されます
+
+#### 23.2.7 更新後のルールの確認
+
+**更新後のルール:**
+
+| タイプ       | プロトコル | ポート範囲 | ソース    | 説明                               |
+| ------------ | ---------- | ---------- | --------- | ---------------------------------- |
+| カスタム TCP | TCP        | 8080       | 0.0.0.0/0 | Allow Spring Boot API access on... |
+
+> **即座に反映:**
+>
+> - セキュリティグループの変更は**リアルタイムで反映**されます
+> - ECS サービスやタスクを再起動する必要はありません
+
+---
+
+## 24. アプリケーションへのアクセス(成功)
+
+### 24.1 再度アクセス
+
+#### 24.1.1 ブラウザで URL を開く
+
+セキュリティグループの設定が完了したので、再度ブラウザで以下の URL にアクセスします:
+
+```
+http://<パブリックIP>:8080/api/hello
+```
+
+例:
+
+```
+http://54.123.45.67:8080/api/hello
+```
+
+#### 24.1.2 成功の確認
+
+ブラウザに以下のようなレスポンスが表示されます:
+
+```
+Hello
+```
+
+または、Spring Boot アプリケーションで設定した文字列が表示されます。
+
+> **成功!**
+>
+> これで、GitHub から ECS へのデプロイが完全に成功し、アプリケーションにアクセスできるようになりました。
+
+---
+
+## 25. CI/CD パイプライン完成
+
+### 25.1 達成したこと
+
+このセクションを通じて、以下を達成しました:
+
+#### 25.1.1 構築したリソース
+
+1. **GitHub リポジトリ**: `ecs-learning-course`
+2. **ECR リポジトリ**: `my-app-api`(Docker イメージを保存)
+3. **ECS タスク定義**: `my-app-api`(コンテナの設定を定義)
+4. **ECS サービス**: `my-app-api-service`(タスクを管理)
+5. **セキュリティグループ**: `my-app-api-sg`(8080 番ポートを許可)
+6. **IAM ロール**: `GitHubActionsEcsLearningCourse`(OIDC 用、PassRole 権限を含む)
+
+#### 25.1.2 構築したパイプライン
+
+**GitHub Actions ワークフロー**により、以下の自動化を実現しました:
+
+1. **テストビルド**:
+   - コードを GitHub にプッシュ
+   - Spring Boot アプリケーションをビルド
+   - Gradle テストを実行
+2. **デプロイ**:
+   - Docker イメージをビルド
+   - ECR にイメージをプッシュ
+   - タスク定義を更新(新しいリビジョンを作成)
+   - ECS サービスを更新(新しいタスクをデプロイ)
+
+### 25.2 CI/CD の流れ
+
+```
+┌─────────────────┐
+│  開発者         │
+│  コードを変更   │
+└────────┬────────┘
+         │
+         │ git push
+         ▼
+┌─────────────────────────┐
+│  GitHub リポジトリ      │
+│  (ecs-learning-course)  │
+└────────┬────────────────┘
+         │
+         │ トリガー
+         ▼
+┌─────────────────────────┐
+│  GitHub Actions         │
+│  ワークフロー実行       │
+├─────────────────────────┤
+│  1. テストビルド        │
+│     - Gradle ビルド     │
+│     - テスト実行        │
+│  2. デプロイ            │
+│     - Docker ビルド     │
+│     - ECR プッシュ      │
+│     - タスク定義更新    │
+│     - ECS デプロイ      │
+└────────┬────────────────┘
+         │
+         │ デプロイ完了
+         ▼
+┌─────────────────────────┐
+│  AWS ECS                │
+│  (my-app-api-service)   │
+├─────────────────────────┤
+│  Spring Boot API        │
+│  http://IP:8080/api/... │
+└─────────────────────────┘
+```
+
+### 25.3 今後の開発フロー
+
+これからは、以下のような開発フローで作業できます:
+
+1. **ローカルで開発**:
+   - コードを修正
+   - ローカルでテスト
+2. **GitHub にプッシュ**:
+   ```bash
+   git add .
+   git commit -m "新機能を追加"
+   git push origin main
+   ```
+3. **自動デプロイ**:
+   - GitHub Actions が自動的に実行されます
+   - テスト → ビルド → デプロイが自動化されています
+4. **確認**:
+   - GitHub Actions で実行結果を確認
+   - ECS でデプロイされたアプリケーションを確認
+
+### 25.4 所要時間
+
+**デプロイ時間:**
+
+- パイプライン全体: 約 3〜5 分
+  - テストビルド: 約 1〜2 分
+  - デプロイ: 約 2〜3 分
+
+### 25.5 まとめ
+
+おつかれさまでした!
+
+非常に長い手順でしたが、これで **GitHub から ECS へのタスクデプロイ**を実現する CI/CD パイプラインが完成しました。
+
+**重要なポイント:**
+
+- **自動化**: コードをプッシュするだけで、自動的にデプロイされます
+- **セキュリティ**: OIDC を使用し、長期的なアクセスキーを使用しません
+- **再現性**: タスク定義ファイルでインフラをコード管理できます
+- **トレーサビリティ**: Docker イメージにコミットハッシュをタグ付けし、どのコードからビルドされたかを追跡できます
+
+---
+
+## 26. リソースのクリーンアップ
+
+### 26.1 概要
+
+今回の講義で使用したタスクは不要となりましたので、削除を行います。起動したままにしておくとコストが発生し続けるため、使用しないリソースは削除することをおすすめします。
+
+> **注意**: ECS クラスター`my-app-cluster`は今後の講義でも使用しますので、削除しないでください。
+
+### 26.2 削除するリソース
+
+| リソース         | 名前                 | 削除 | 理由                                 |
+| ---------------- | -------------------- | ---- | ------------------------------------ |
+| **ECS クラスター** | `my-app-cluster`     | ✗    | 今後の講義でも使用するため残す       |
+| **ECS サービス**   | `my-app-api-service` | ✓    | 今回の講義で使用したため削除         |
+| **ECR イメージ**   | `my-app-api`         | △    | オプション(イメージサイズに応じて課金) |
+
+---
+
+## 27. ECS サービスの削除
+
+### 27.1 概要
+
+ECS サービス`my-app-api-service`を CloudFormation から削除します。
+
+> **重要**: ECS コンソールから直接削除することもできますが、CloudFormation から削除することで、関連リソースをまとめて削除し、ゴミが残らないようにします。
+
+### 27.2 手順
+
+#### 27.2.1 CloudFormation コンソールへアクセス
+
+1. AWS マネジメントコンソールで「CloudFormation」を検索します
+2. 「CloudFormation」を選択します
+
+#### 27.2.2 サービス用のスタックを確認
+
+1. スタックの一覧から、`my-app-api-service`を作成した際に自動生成された CloudFormation スタックを探します
+   - スタック名に`my-app-api-service`や`ECS-Console-V2`などの文字列が含まれているはずです
+   - このスタックは、ECS コンソールからサービスを作成した際に自動的に AWS が作成したものです
+
+#### 27.2.3 スタックの削除
+
+1. 削除したいスタックにチェックを入れます
+2. 「削除」ボタンをクリックします
+3. 確認画面が表示されたら、「削除」をクリックします
+
+#### 27.2.4 削除の確認
+
+1. 「更新」ボタンをクリックして、ステータスを確認します
+2. ステータスが`DELETE_IN_PROGRESS`(削除中)になっていることを確認します
+3. しばらく待つと、スタックが一覧から消えます(削除完了)
+
+> **所要時間**: 削除には数分かかる場合があります。
+
+#### 27.2.5 ECS サービスが削除されたことを確認
+
+1. ECS コンソールに戻ります
+2. クラスター`my-app-cluster`を開きます
+3. 「更新」ボタンをクリックします
+4. サービス`my-app-api-service`が一覧から消えていることを確認します
+
+---
+
+## 28. ECR イメージの削除(オプション)
+
+### 28.1 概要
+
+ECR(Elastic Container Registry)に保存されているイメージは、イメージのサイズに応じて課金されます。不要なイメージを削除することでコストを削減できます。
+
+> **注意**: このステップはオプションです。今後も使用する可能性がある場合は、削除しなくても問題ありません。
+
+### 28.2 課金について
+
+**ECR の課金ポイント:**
+
+- **保存容量**: イメージのサイズに応じて課金
+- **データ転送**: イメージの pull/push 時のデータ転送量に応じて課金
+
+**無料枠:**
+
+- 毎月 500MB のストレージ(12 ヶ月間)
+
+### 28.3 ECR イメージの削除手順
+
+#### 28.3.1 ECR コンソールへアクセス
+
+1. AWS マネジメントコンソールで「ECR」を検索します
+2. 「Elastic Container Registry」を選択します
+
+#### 28.3.2 リポジトリの確認
+
+1. 左側のメニューから「リポジトリ」をクリックします
+2. リポジトリ`my-app-api`をクリックして、イメージ一覧を表示します
+
+#### 28.3.3 イメージの削除
+
+1. 削除したいイメージにチェックを入れます
+   - 今までにプッシュしたイメージが複数存在している可能性があります
+   - 不要なイメージを選択してください
+2. 「削除」ボタンをクリックします
+3. 確認画面が表示されたら、`delete`と入力して「削除」をクリックします
+
+> **注意**: イメージを削除すると、そのイメージを使用しているタスクは起動できなくなります。必要なイメージまで削除しないよう注意してください。
+
+#### 28.3.4 リポジトリ全体の削除(オプション)
+
+リポジトリ自体を削除する場合は、以下の手順を実行します:
+
+1. リポジトリ一覧に戻ります
+2. 削除したいリポジトリ`my-app-api`にチェックを入れます
+3. 「削除」ボタンをクリックします
+4. 確認画面が表示されたら、リポジトリ名を入力して「削除」をクリックします
+
+> **注意**: リポジトリを削除すると、その中のすべてのイメージも削除されます。
+
+---
+
+## 29. クリーンアップ完了
+
+### 29.1 削除されたリソースの確認
+
+以下のリソースが削除されました:
+
+- [ ] ECS サービス`my-app-api-service`が削除された
+- [ ] CloudFormation スタックが削除された
+- [ ] (オプション)ECR イメージが削除された
+
+### 29.2 残っているリソース
+
+以下のリソースは今後の講義で使用するため、残しておきます:
+
+- ✓ ECS クラスター`my-app-cluster`
+- ✓ VPC`my-workspace-vpc`
+- ✓ サブネット(パブリック・プライベート)
+- ✓ タスク実行ロール`ecsTaskExecutionRole`
+- ✓ GitHub リポジトリ
+- ✓ IAM ロール(GitHub Actions 用)
+- ✓ (オプション)ECR リポジトリ
+
+### 29.3 コスト管理のベストプラクティス
+
+**使用しないリソースは削除する:**
+
+- ECS サービスやタスクは、使用していなくても課金されます
+- 不要になったらすぐに削除しましょう
+
+**定期的にリソースを確認する:**
+
+- 定期的に AWS コンソールでリソースを確認し、不要なものがないかチェックしましょう
+- CloudWatch や Cost Explorer を使用してコストを監視しましょう
+
+**タグを活用する:**
+
+- リソースにタグを付けることで、どのプロジェクトで使用しているか管理しやすくなります
+
+---
+
+
+
+
+
